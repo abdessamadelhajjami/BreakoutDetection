@@ -36,8 +36,10 @@ def download_sp500_data(start, end):
     symbols = get_sp500_components()
     data = {}
     for symbol in symbols:
-        data[symbol] = yf.download(symbol, start=start, end=end)
-        data[symbol].to_csv(f'ohlcv_data_{symbol}.csv')
+        df = yf.download(symbol, start=start, end=end)
+        df.reset_index(inplace=True)  # Réinitialiser l'index pour s'assurer que 'Date' est une colonne
+        data[symbol] = df
+        df.to_csv(f'ohlcv_data_{symbol}.csv')
     return data
 
 # Load data into Snowflake
