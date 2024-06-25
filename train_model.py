@@ -13,17 +13,17 @@ import requests
 import os
 
 # Telegram bot configuration
-TELEGRAM_API_URL = "https://api.telegram.org/bot<your_bot_token>/sendMessage"
-TELEGRAM_CHAT_ID = "<your_chat_id>"
+TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
+TELEGRAM_CHAT_ID = "https://t.me/Breakout_Channel" 
 
 # Snowflake connection configuration
 SNOWFLAKE_CONN = {
     'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
-    'user': 'AELHAJJAMI',
-    'password': 'Abdou3012',
-    'warehouse': 'CRYPTO_WH',
-    'database': 'YahooFinanceData',
-    'schema': 'stock_data',
+        'user': 'AELHAJJAMI',
+        'password': 'Abdou3012',
+        'warehouse': 'CRYPTO_WH',
+        'database': 'BREAKOUDETECTIONDB',
+        'schema': 'SP500',
 }
 
 # Functions to get SP500 components
@@ -164,64 +164,52 @@ def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_perce
         else:
             return 'FH', price_variation_percentage
 
+
 def calculate_sma(df, periods):
     for period in periods:
-        sma_key = f'SMA_{period}'  # Création du nom de la colonne pour la SMA
-        # Application de la moyenne mobile sur la colonne 'Close' pour la période donnée
+        sma_key = f'SMA_{period}'
         df[sma_key] = df['Close'].rolling(window=period).mean()
     return df
 
 def calculate_macd(df, fast_period=12, slow_period=26, signal_period=9):
-    exp1 = df['Close'].ewm(span=fast_period, adjust=False).mean()  # EMA rapide
-    exp2 = df['Close'].ewm(span=slow_period, adjust=False).mean()  # EMA lente
-    macd = exp1 - exp2  # Calcul de la ligne MACD
-    signal = macd.ewm(span=signal_period, adjust=False).mean()  # Ligne de signal
+    exp1 = df['Close'].ewm(span=fast_period, adjust=False).mean()
+    exp2 = df['Close'].ewm(span=slow_period, adjust=False).mean()
+    macd = exp1 - exp2
+    signal = macd.ewm(span=signal_period, adjust=False).mean()
     df['MACD'] = macd
     df['MACD_signal'] = signal
     return df
 
 def calculate_rsi(df, period=14):
-    delta = df['Close'].diff(1)  # Différence des prix de clôture d'un jour à l'autre
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()  # Moyenne des gains
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()  # Moyenne des pertes
-    rs = gain / loss  # Ratio des moyennes de gain et de perte
-    df['RSI'] = 100 - (100 / (1 + rs))  # Calcul de l'RSI
+    delta = df['Close'].diff(1)
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
     return df
 
 def calculate_bbands(df, period=20, std_dev=2):
-    mid_band = df['Close'].rolling(window=period).mean()  # Bande du milieu
-    sd = df['Close'].rolling(window=period).std()  # Écart-type des prix de clôture
-    df['Bollinger_High'] = mid_band + (std_dev * sd)  # Bande haute
-    df['Bollinger_Low'] = mid_band - (std_dev * sd)  # Bande basse
+    mid_band = df['Close'].rolling(window=period).mean()
+    sd = df['Close'].rolling(window=period).std()
+    df['Bollinger_High'] = mid_band + (std_dev * sd)
+    df['Bollinger_Low'] = mid_band - (std_dev * sd)
     df['Bollinger_Mid'] = mid_band
     return df
 
 def calculate_volume_ma(df, period=20):
-    df['Volume_MA'] = df['Volume'].rolling(window=period).mean()  # Moyenne mobile du volume
+    df['Volume_MA'] = df['Volume'].rolling(window=period).mean()
     return df
 
 def calculate_keltner_channel(df, ema_period=20, atr_period=20, multiplier=2):
-    df['Keltner_Mid'] = df['Close'].ewm(span=ema_period, adjust=False).mean()  # Ligne centrale du canal
+    df['Keltner_Mid'] = df['Close'].ewm(span=ema_period, adjust=False).mean()
     high_low = df['High'] - df['Low']
     high_close = (df['High'] - df['Close'].shift()).abs()
     low_close = (df['Low'] - df['Close'].shift()).abs()
     ranges = pd.concat([high_low, high_close, low_close], axis=1)
-    df['ATR'] = ranges.max(axis=1).rolling(window=atr_period).mean()  # Average True Range
-    df['Keltner_High'] = df['Keltner_Mid'] + multiplier * df['ATR']  # Bande haute
-    df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']  # Bande basse
+    df['ATR'] = ranges.max(axis=1).rolling(window=atr_period).mean()
+    df['Keltner_High'] = df['Keltner_Mid'] + multiplier * df['ATR']
+    df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']
     return df
-
-
-def calculate_all_indicators(df):
-    df = calculate_sma(df, [7, 20, 50, 200])
-    df = calculate_macd(df)
-    df = calculate_rsi(df)
-    df = calculate_bbands(df)
-    df = calculate_volume_ma(df)
-    df = calculate_keltner_channel(df)
-    return df
-#Usage des fonctions
-
 
 # Calculate indicators
 def calculate_all_indicators(df):
@@ -343,9 +331,10 @@ def main():
         df = session.table(table['TABLE_NAME']).to_pandas()
         vh_vb = df[(df['Breakout_Confirmed'] == 'VH') | (df['Breakout_Confirmed'] == 'VB')]
         for _, row in vh_vb.iterrows():
-            message = f"Breakout detected for {table['TABLE_NAME']}: {row['Breakout_Confirmed']} on {row['Date']}"
+            message = f"A True Bullish/Bearish breakout detected today for the action {table['TABLE_NAME']}: {row['Breakout_Confirmed']} on {row['Date']}"
             send_telegram_message(message)
     session.close()
 
 if __name__ == "__main__":
     main()
+
