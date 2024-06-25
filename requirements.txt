@@ -1,0 +1,10 @@
+pandas
+numpy
+scipy
+scikit-learn
+joblib
+yfinance
+requests
+python-telegram-bot
+snowflake-connector-python
+snowflake-snowpark-python
