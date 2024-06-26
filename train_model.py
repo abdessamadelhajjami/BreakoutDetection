@@ -1,4 +1,3 @@
-
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -15,7 +14,6 @@ import joblib
 import requests
 import os
 
-
 # Telegram bot configuration
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
 TELEGRAM_CHAT_ID = "https://t.me/Breakout_Channel"
@@ -29,8 +27,6 @@ SNOWFLAKE_CONN = {
     'database': 'BREAKOUDETECTIONDB',
     'schema': 'SP500',
 }
-
-
 
 # Functions to get SP500 components
 def get_sp500_components():
@@ -65,6 +61,7 @@ def load_data_to_snowflake(data):
         df['Date'] = df['Date'].astype(str)  # Convert dates to string
         table_name = f'ohlcv_data_{symbol}'
 
+        # Vérifier si la table existe et la créer si elle n'existe pas
         cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS {SNOWFLAKE_CONN['schema']}.{table_name} (
                 Date STRING, 
@@ -77,6 +74,7 @@ def load_data_to_snowflake(data):
             )
         """)
 
+        # Insérer les données dans la table
         write_pandas(conn, df, table_name)
 
     conn.close()
@@ -343,5 +341,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
