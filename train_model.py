@@ -1,3 +1,22 @@
+
+
+# Telegram bot configuration
+TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
+TELEGRAM_CHAT_ID = "https://t.me/Breakout_Channel"
+
+# Snowflake connection configuration
+SNOWFLAKE_CONN = {
+    'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
+    'user': 'AELHAJJAMI',
+    'password': 'Abdou3012',
+    'warehouse': 'CRYPTO_WH',
+    'database': 'BREAKOUDETECTIONDB',
+    'schema': 'SP500',
+}
+
+
+
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -12,6 +31,10 @@ from sklearn.preprocessing import StandardScaler
 import joblib
 import requests
 import os
+
+
+
+
 
 # Telegram bot configuration
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
@@ -55,12 +78,12 @@ def load_data_to_snowflake(data):
 
     for symbol, df in data.items():
         df.reset_index(inplace=True)
+        df['Date'] = df['Date'].astype(str)  # Convert dates to string
         table_name = f'ohlcv_data_{symbol}'
 
-        # Vérifier si la table existe et la créer si elle n'existe pas
         cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
-                Date DATE, 
+                Date STRING, 
                 Open FLOAT, 
                 High FLOAT, 
                 Low FLOAT, 
@@ -69,15 +92,14 @@ def load_data_to_snowflake(data):
                 Volume FLOAT
             )
         """)
-        
-        # Convertir le DataFrame en une liste de tuples pour insertion en bloc
+
         data_tuples = [tuple(x) for x in df.to_numpy()]
         columns = ', '.join(df.columns)
         placeholders = ', '.join(['%s'] * len(df.columns))
         insert_query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
-
-        # Insérer les données en bloc
         cursor.executemany(insert_query, data_tuples)
+
+    conn.commit()
     conn.close()
 
 # Calculate pivot reversals
@@ -336,12 +358,7 @@ def main():
         df = session.table(table['TABLE_NAME']).to_pandas()
         vh_vb = df[(df['Breakout_Confirmed'] == 'VH') | (df['Breakout_Confirmed'] == 'VB')]
         for _, row in vh_vb.iterrows():
-            message = f"A True Bullish/Bearish breakout detected today for the action {table['TABLE_NAME']}: {row['Breakout_Confirmed']} on {row['Date']}"
-            send_telegram_message(message)
-    session.close()
-
-if __name__ == "__main__":
-    main()
+            message = f"A True Bullish/Bearish breakout detected today for
 
 
 
