@@ -358,9 +358,11 @@ def main():
         df = session.table(table['TABLE_NAME']).to_pandas()
         vh_vb = df[(df['Breakout_Confirmed'] == 'VH') | (df['Breakout_Confirmed'] == 'VB')]
         for _, row in vh_vb.iterrows():
-            message = f"A True Bullish/Bearish breakout detected today for
+            message = f"A True Bullish/Bearish breakout detected today for the action {table['TABLE_NAME']}: {row['Breakout_Confirmed']} on {row['Date']}"
+            send_telegram_message(message)
+    session.close()
 
-
-
+if __name__ == "__main__":
+    main()
 
 
