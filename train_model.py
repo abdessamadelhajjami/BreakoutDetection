@@ -1,3 +1,6 @@
+
+
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -27,7 +30,6 @@ SNOWFLAKE_CONN = {
     'database': 'BREAKOUDETECTIONDB',
     'schema': 'SP500',
 }
-
 # Functions to get SP500 components
 def get_sp500_components():
     df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
@@ -54,16 +56,14 @@ def load_data_to_snowflake(data):
     )
     cursor = conn.cursor()
 
-    cursor.execute(f"CREATE SCHEMA IF NOT EXISTS {SNOWFLAKE_CONN['schema']}")
-
     for symbol, df in data.items():
         df.reset_index(inplace=True)
         df['Date'] = df['Date'].astype(str)  # Convert dates to string
         table_name = f'ohlcv_data_{symbol}'
 
-        # Vérifier si la table existe et la créer si elle n'existe pas
+        # Create the table if it doesn't exist
         cursor.execute(f"""
-            CREATE TABLE IF NOT EXISTS {SNOWFLAKE_CONN['schema']}.{table_name} (
+            CREATE TABLE IF NOT EXISTS {table_name} (
                 Date STRING, 
                 Open FLOAT, 
                 High FLOAT, 
@@ -75,8 +75,9 @@ def load_data_to_snowflake(data):
         """)
 
         # Insérer les données dans la table
-        write_pandas(conn, df, table_name)
-
+        success, nchunks, nrows, _ = write_pandas(conn, df, table_name)
+        if not success:
+            print(f"Failed to insert data into {table_name}")
     conn.close()
 
 # Calculate pivot reversals
