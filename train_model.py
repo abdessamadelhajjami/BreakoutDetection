@@ -1,9 +1,9 @@
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from scipy import stats
 import snowflake.connector
-from snowflake.connector.pandas_tools import write_pandas
 from snowflake.snowpark import Session
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -28,7 +28,7 @@ SNOWFLAKE_CONN = {
     'schema': 'SP500',
 }
 
-# Functions to get SP500 components
+# Function to get SP500 components
 def get_sp500_components():
     df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
     return df["Symbol"].tolist()
@@ -39,32 +39,8 @@ def download_sp500_data(start, end):
     data = {}
     for symbol in symbols:
         data[symbol] = yf.download(symbol, start=start, end=end)
-        data[symbol].reset_index(inplace=True)  # Reset index to include the Date column in the DataFrame
+        data[symbol].to_csv(f'ohlcv_data_{symbol}.csv')
     return data
-
-# Create table and insert data into Snowflake
-def create_table_and_insert_data(conn, df, table_name):
-    cursor = conn.cursor()
-
-    create_table_query = f"""
-    CREATE OR REPLACE TABLE {table_name} (
-        Date TIMESTAMP_NTZ, 
-        Open FLOAT, 
-        High FLOAT, 
-        Low FLOAT, 
-        Close FLOAT, 
-        Adj_Close FLOAT, 
-        Volume FLOAT
-    )
-    """
-    cursor.execute(create_table_query)
-
-    # Convert the Date column to string format to handle TIMESTAMP_NTZ in Snowflake
-    df['Date'] = df['Date'].astype(str)
-
-    success, nchunks, nrows, _ = write_pandas(conn, df, table_name)
-    if not success:
-        raise Exception(f"Failed to insert data into table {table_name}")
 
 # Load data into Snowflake
 def load_data_to_snowflake(data):
@@ -76,11 +52,36 @@ def load_data_to_snowflake(data):
         database=SNOWFLAKE_CONN['database'],
         schema=SNOWFLAKE_CONN['schema']
     )
+    cursor = conn.cursor()
 
     for symbol, df in data.items():
+        df.reset_index(inplace=True)
         table_name = f'ohlcv_data_{symbol}'
-        create_table_and_insert_data(conn, df, table_name)
+        cursor.execute(f"""
+            CREATE OR REPLACE TABLE {table_name} (
+                Date DATE, 
+                Open FLOAT, 
+                High FLOAT, 
+                Low FLOAT, 
+                Close FLOAT, 
+                Adj_Close FLOAT, 
+                Volume FLOAT
+            )
+        """)
 
+        for _, row in df.iterrows():
+            cursor.execute(f"""
+                INSERT INTO {table_name} (Date, Open, High, Low, Close, Adj_Close, Volume) VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
+                row['Date'].strftime('%Y-%m-%d'), 
+                row['Open'], 
+                row['High'], 
+                row['Low'], 
+                row['Close'], 
+                row['Adj Close'], 
+                row['Volume']
+            ))
+    conn.commit()
     conn.close()
 
 # Calculate pivot reversals
@@ -173,7 +174,6 @@ def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_perce
         else:
             return 'FH', price_variation_percentage
 
-# Calculate indicators
 def calculate_sma(df, periods):
     for period in periods:
         sma_key = f'SMA_{period}'
@@ -220,7 +220,7 @@ def calculate_keltner_channel(df, ema_period=20, atr_period=20, multiplier=2):
     df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']
     return df
 
-# Calculate all indicators
+# Calculate indicators
 def calculate_all_indicators(df):
     df = calculate_sma(df, [7, 20, 50, 200])
     df = calculate_macd(df)
@@ -336,6 +336,7 @@ def main():
     tables = session.sql("SELECT DISTINCT 'OHLCV_DATA_' || Symbol AS table_name FROM SP500_HISTORIQUE").collect()
     for table in tables:
         train_and_save_model(session, table['TABLE_NAME'])
+        # Check for VH or VB
         df = session.table(table['TABLE_NAME']).to_pandas()
         vh_vb = df[(df['Breakout_Confirmed'] == 'VH') | (df['Breakout_Confirmed'] == 'VB')]
         for _, row in vh_vb.iterrows():
