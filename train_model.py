@@ -4,6 +4,7 @@ import numpy as np
 from scipy import stats
 import snowflake.connector
 import snowflake.snowpark as snowpark
+from snowflake.snowpark.functions import col
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
@@ -14,16 +15,16 @@ import os
 
 # Telegram bot configuration
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
-TELEGRAM_CHAT_ID = "https://t.me/Breakout_Channel" 
+TELEGRAM_CHAT_ID = "https://t.me/Breakout_Channel"
 
 # Snowflake connection configuration
 SNOWFLAKE_CONN = {
     'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
-        'user': 'AELHAJJAMI',
-        'password': 'Abdou3012',
-        'warehouse': 'CRYPTO_WH',
-        'database': 'BREAKOUDETECTIONDB',
-        'schema': 'SP500',
+    'user': 'AELHAJJAMI',
+    'password': 'Abdou3012',
+    'warehouse': 'CRYPTO_WH',
+    'database': 'BREAKOUDETECTIONDB',
+    'schema': 'SP500',
 }
 
 # Functions to get SP500 components
@@ -44,19 +45,11 @@ def download_sp500_data(start, end):
 
 # Load data into Snowflake
 def load_data_to_snowflake(data):
-    conn = snowflake.connector.connect(
-        user=SNOWFLAKE_CONN['user'],
-        password=SNOWFLAKE_CONN['password'],
-        account=SNOWFLAKE_CONN['account'],
-        warehouse=SNOWFLAKE_CONN['warehouse'],
-        database=SNOWFLAKE_CONN['database'],
-        schema=SNOWFLAKE_CONN['schema']
-    )
-    cursor = conn.cursor()
+    session = snowpark.Session.builder.configs(SNOWFLAKE_CONN).create()
 
     for symbol, df in data.items():
         table_name = f'ohlcv_data_{symbol}'
-        cursor.execute(f"""
+        session.sql(f"""
             CREATE OR REPLACE TABLE {table_name} (
                 Date DATE, 
                 Open FLOAT, 
@@ -66,15 +59,13 @@ def load_data_to_snowflake(data):
                 Adj_Close FLOAT, 
                 Volume FLOAT
             )
-        """)
-        for _, row in df.iterrows():
-            cursor.execute(f"""
-                INSERT INTO {table_name} VALUES (
-                    TO_DATE('{row['Date']}'), {row['Open']}, {row['High']}, 
-                    {row['Low']}, {row['Close']}, {row['Adj Close']}, {row['Volume']}
-                )
-            """)
-    conn.close()
+        """).collect()
+        
+        # Use the Snowpark DataFrame API to load data efficiently
+        snow_df = session.create_dataframe(df)
+        snow_df.write.save_as_table(table_name, mode="append")
+    
+    session.close()
 
 # Calculate pivot reversals
 def calculate_pivot_reversals(df, window=3):
@@ -165,7 +156,6 @@ def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_perce
             return 'VH', price_variation_percentage
         else:
             return 'FH', price_variation_percentage
-
 
 def calculate_sma(df, periods):
     for period in periods:
@@ -329,7 +319,6 @@ def main():
     tables = session.sql("SELECT DISTINCT 'OHLCV_DATA_' || Symbol AS table_name FROM SP500_HISTORIQUE").collect()
     for table in tables:
         train_and_save_model(session, table['TABLE_NAME'])
-        # Check for VH or VB
         df = session.table(table['TABLE_NAME']).to_pandas()
         vh_vb = df[(df['Breakout_Confirmed'] == 'VH') | (df['Breakout_Confirmed'] == 'VB')]
         for _, row in vh_vb.iterrows():
@@ -339,4 +328,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
 
