@@ -1,10 +1,12 @@
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from scipy import stats
 import snowflake.connector
-import snowflake.snowpark as snowpark
 from snowflake.connector.pandas_tools import write_pandas
+from snowflake.snowpark import Session
+from snowflake.snowpark.types import StructType, StructField, StringType, FloatType
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
@@ -12,6 +14,7 @@ from sklearn.preprocessing import StandardScaler
 import joblib
 import requests
 import os
+
 
 # Telegram bot configuration
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
@@ -26,6 +29,8 @@ SNOWFLAKE_CONN = {
     'database': 'BREAKOUDETECTIONDB',
     'schema': 'SP500',
 }
+
+
 
 # Functions to get SP500 components
 def get_sp500_components():
@@ -53,12 +58,16 @@ def load_data_to_snowflake(data):
     )
     cursor = conn.cursor()
 
+    cursor.execute(f"CREATE SCHEMA IF NOT EXISTS {SNOWFLAKE_CONN['schema']}")
+
     for symbol, df in data.items():
         df.reset_index(inplace=True)
+        df['Date'] = df['Date'].astype(str)  # Convert dates to string
         table_name = f'ohlcv_data_{symbol}'
+
         cursor.execute(f"""
-            CREATE OR REPLACE TABLE {table_name} (
-                Date DATE, 
+            CREATE TABLE IF NOT EXISTS {SNOWFLAKE_CONN['schema']}.{table_name} (
+                Date STRING, 
                 Open FLOAT, 
                 High FLOAT, 
                 Low FLOAT, 
@@ -67,9 +76,10 @@ def load_data_to_snowflake(data):
                 Volume FLOAT
             )
         """)
-        write_pandas(conn, df, table_name)
-    conn.close()
 
+        write_pandas(conn, df, table_name)
+
+    conn.close()
 
 # Calculate pivot reversals
 def calculate_pivot_reversals(df, window=3):
@@ -315,7 +325,7 @@ def main():
         'database': SNOWFLAKE_CONN['database'],
         'schema': SNOWFLAKE_CONN['schema']
     }
-    session = snowpark.Session.builder.configs(connection_parameters).create()
+    session = Session.builder.configs(connection_parameters).create()
     start_date = '2010-01-01'
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
     data = download_sp500_data(start_date, end_date)
@@ -333,4 +343,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
