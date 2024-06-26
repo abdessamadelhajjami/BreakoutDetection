@@ -56,8 +56,10 @@ def load_data_to_snowflake(data):
     for symbol, df in data.items():
         df.reset_index(inplace=True)
         table_name = f'ohlcv_data_{symbol}'
+
+        # Vérifier si la table existe et la créer si elle n'existe pas
         cursor.execute(f"""
-            CREATE OR REPLACE TABLE {table_name} (
+            CREATE TABLE IF NOT EXISTS {table_name} (
                 Date DATE, 
                 Open FLOAT, 
                 High FLOAT, 
@@ -67,7 +69,15 @@ def load_data_to_snowflake(data):
                 Volume FLOAT
             )
         """)
-        write_pandas(conn, df, table_name)
+        
+        # Convertir le DataFrame en une liste de tuples pour insertion en bloc
+        data_tuples = [tuple(x) for x in df.to_numpy()]
+        columns = ', '.join(df.columns)
+        placeholders = ', '.join(['%s'] * len(df.columns))
+        insert_query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
+
+        # Insérer les données en bloc
+        cursor.executemany(insert_query, data_tuples)
     conn.close()
 
 # Calculate pivot reversals
@@ -159,6 +169,7 @@ def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_perce
             return 'VH', price_variation_percentage
         else:
             return 'FH', price_variation_percentage
+
 def calculate_sma(df, periods):
     for period in periods:
         sma_key = f'SMA_{period}'
@@ -204,7 +215,7 @@ def calculate_keltner_channel(df, ema_period=20, atr_period=20, multiplier=2):
     df['Keltner_High'] = df['Keltner_Mid'] + multiplier * df['ATR']
     df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']
     return df
-    
+
 # Calculate indicators
 def calculate_all_indicators(df):
     df = calculate_sma(df, [7, 20, 50, 200])
@@ -331,11 +342,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
 
 
 
