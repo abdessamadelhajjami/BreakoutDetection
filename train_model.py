@@ -55,12 +55,10 @@ def load_data_to_snowflake(data):
 
     for symbol, df in data.items():
         df.reset_index(inplace=True)
-        df['Date'] = df['Date'].astype(str)  # Convert dates to string
         table_name = f'ohlcv_data_{symbol}'
-
         cursor.execute(f"""
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                Date STRING, 
+            CREATE OR REPLACE TABLE {table_name} (
+                Date DATE, 
                 Open FLOAT, 
                 High FLOAT, 
                 Low FLOAT, 
@@ -69,13 +67,9 @@ def load_data_to_snowflake(data):
                 Volume FLOAT
             )
         """)
-
-        data_tuples = [tuple(x) for x in df.to_numpy()]
-        insert_query = f"INSERT INTO {table_name} VALUES (%s, %s, %s, %s, %s, %s, %s)"
-        cursor.executemany(insert_query, data_tuples)
-
-    conn.commit()
+        write_pandas(conn, df, table_name)
     conn.close()
+
 
 # Calculate pivot reversals
 def calculate_pivot_reversals(df, window=3):
