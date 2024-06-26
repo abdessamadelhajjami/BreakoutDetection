@@ -4,7 +4,7 @@ import numpy as np
 from scipy import stats
 import snowflake.connector
 import snowflake.snowpark as snowpark
-from snowflake.snowpark.functions import col
+from snowflake.connector.pandas_tools import write_pandas
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
@@ -37,19 +37,26 @@ def download_sp500_data(start, end):
     symbols = get_sp500_components()
     data = {}
     for symbol in symbols:
-        df = yf.download(symbol, start=start, end=end)
-        df.reset_index(inplace=True)  # Réinitialiser l'index pour s'assurer que 'Date' est une colonne
-        data[symbol] = df
-        df.to_csv(f'ohlcv_data_{symbol}.csv')
+        data[symbol] = yf.download(symbol, start=start, end=end)
+        data[symbol].to_csv(f'ohlcv_data_{symbol}.csv')
     return data
 
 # Load data into Snowflake
 def load_data_to_snowflake(data):
-    session = snowpark.Session.builder.configs(SNOWFLAKE_CONN).create()
+    conn = snowflake.connector.connect(
+        user=SNOWFLAKE_CONN['user'],
+        password=SNOWFLAKE_CONN['password'],
+        account=SNOWFLAKE_CONN['account'],
+        warehouse=SNOWFLAKE_CONN['warehouse'],
+        database=SNOWFLAKE_CONN['database'],
+        schema=SNOWFLAKE_CONN['schema']
+    )
+    cursor = conn.cursor()
 
     for symbol, df in data.items():
+        df.reset_index(inplace=True)
         table_name = f'ohlcv_data_{symbol}'
-        session.sql(f"""
+        cursor.execute(f"""
             CREATE OR REPLACE TABLE {table_name} (
                 Date DATE, 
                 Open FLOAT, 
@@ -59,12 +66,9 @@ def load_data_to_snowflake(data):
                 Adj_Close FLOAT, 
                 Volume FLOAT
             )
-        """).collect()
-        
-        # Use the Snowpark DataFrame API to load data efficiently
-        snow_df = session.write_pandas(df, table_name, auto_create_table=False)
-    
-    session.close()
+        """)
+        write_pandas(conn, df, table_name)
+    conn.close()
 
 # Calculate pivot reversals
 def calculate_pivot_reversals(df, window=3):
@@ -155,7 +159,6 @@ def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_perce
             return 'VH', price_variation_percentage
         else:
             return 'FH', price_variation_percentage
-
 def calculate_sma(df, periods):
     for period in periods:
         sma_key = f'SMA_{period}'
@@ -201,7 +204,7 @@ def calculate_keltner_channel(df, ema_period=20, atr_period=20, multiplier=2):
     df['Keltner_High'] = df['Keltner_Mid'] + multiplier * df['ATR']
     df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']
     return df
-
+    
 # Calculate indicators
 def calculate_all_indicators(df):
     df = calculate_sma(df, [7, 20, 50, 200])
@@ -318,6 +321,7 @@ def main():
     tables = session.sql("SELECT DISTINCT 'OHLCV_DATA_' || Symbol AS table_name FROM SP500_HISTORIQUE").collect()
     for table in tables:
         train_and_save_model(session, table['TABLE_NAME'])
+        # Check for VH or VB
         df = session.table(table['TABLE_NAME']).to_pandas()
         vh_vb = df[(df['Breakout_Confirmed'] == 'VH') | (df['Breakout_Confirmed'] == 'VB')]
         for _, row in vh_vb.iterrows():
@@ -327,6 +331,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
