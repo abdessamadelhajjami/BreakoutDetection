@@ -1,6 +1,4 @@
 
-
-
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -17,6 +15,8 @@ import joblib
 import requests
 import os
 
+
+
 # Telegram bot configuration
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
 TELEGRAM_CHAT_ID = "https://t.me/Breakout_Channel"
@@ -30,6 +30,9 @@ SNOWFLAKE_CONN = {
     'database': 'BREAKOUDETECTIONDB',
     'schema': 'SP500',
 }
+
+
+
 # Functions to get SP500 components
 def get_sp500_components():
     df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
@@ -44,6 +47,26 @@ def download_sp500_data(start, end):
         data[symbol].to_csv(f'ohlcv_data_{symbol}.csv')
     return data
 
+# Create table if not exists and insert data
+def create_table_and_insert_data(conn, df, table_name):
+    cursor = conn.cursor()
+    # Create the table if it doesn't exist
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            Date STRING, 
+            Open FLOAT, 
+            High FLOAT, 
+            Low FLOAT, 
+            Close FLOAT, 
+            Adj_Close FLOAT, 
+            Volume FLOAT
+        )
+    """)
+    success, nchunks, nrows, _ = write_pandas(conn, df, table_name)
+    if not success:
+        print(f"Failed to insert data into {table_name}")
+    cursor.close()
+
 # Load data into Snowflake
 def load_data_to_snowflake(data):
     conn = snowflake.connector.connect(
@@ -54,30 +77,13 @@ def load_data_to_snowflake(data):
         database=SNOWFLAKE_CONN['database'],
         schema=SNOWFLAKE_CONN['schema']
     )
-    cursor = conn.cursor()
 
     for symbol, df in data.items():
         df.reset_index(inplace=True)
         df['Date'] = df['Date'].astype(str)  # Convert dates to string
         table_name = f'ohlcv_data_{symbol}'
+        create_table_and_insert_data(conn, df, table_name)
 
-        # Create the table if it doesn't exist
-        cursor.execute(f"""
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                Date STRING, 
-                Open FLOAT, 
-                High FLOAT, 
-                Low FLOAT, 
-                Close FLOAT, 
-                Adj_Close FLOAT, 
-                Volume FLOAT
-            )
-        """)
-
-        # Insérer les données dans la table
-        success, nchunks, nrows, _ = write_pandas(conn, df, table_name)
-        if not success:
-            print(f"Failed to insert data into {table_name}")
     conn.close()
 
 # Calculate pivot reversals
@@ -342,4 +348,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
