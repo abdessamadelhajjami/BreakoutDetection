@@ -62,8 +62,7 @@ def load_data_to_snowflake(data):
         """).collect()
         
         # Use the Snowpark DataFrame API to load data efficiently
-        snow_df = session.create_dataframe(df)
-        snow_df.write.save_as_table(table_name, mode="append")
+        snow_df = session.write_pandas(df, table_name, auto_create_table=False)
     
     session.close()
 
@@ -328,6 +327,12 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
 
 
 
