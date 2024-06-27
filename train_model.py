@@ -80,6 +80,9 @@ def load_data_to_snowflake(conn, df, table_name):
     # Rename columns to avoid invalid identifiers
     df.columns = [col.replace(' ', '_') for col in df.columns]
     
+    # Ensure 'Date' column is of type string
+    df['Date'] = df['Date'].astype(str)
+    
     # Insert data using `write_pandas`
     success, nchunks, nrows, _ = write_pandas(conn, df, table_name.upper())
     return success, nchunks, nrows
@@ -113,4 +116,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
