@@ -1,3 +1,4 @@
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -13,6 +14,7 @@ import joblib
 import requests
 import os
 
+
 # Telegram bot configuration
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
 TELEGRAM_CHAT_ID = "https://t.me/Breakout_Channel"
@@ -26,7 +28,6 @@ SNOWFLAKE_CONN = {
     'database': 'BREAKOUDETECTIONDB',
     'schema': 'SP500',
 }
-
 
 # Functions to get SP500 components
 def get_sp500_components():
