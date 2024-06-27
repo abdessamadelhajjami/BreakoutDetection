@@ -57,7 +57,7 @@ def get_last_date(conn, table_name):
 def create_table_if_not_exists(conn, table_name):
     cursor = conn.cursor()
     cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS "{SNOWFLAKE_CONN['schema']}"."{table_name}" (
+        CREATE TABLE IF NOT EXISTS "{SNOWFLAKE_CONN['schema']}"."{table_name.upper()}" (
             "Date" DATE, 
             "Open" FLOAT, 
             "High" FLOAT, 
@@ -78,7 +78,7 @@ def load_data_to_snowflake(conn, df, table_name):
     df.reset_index(inplace=True)
     
     # Insert data using `write_pandas`
-    success, nchunks, nrows, _ = write_pandas(conn, df, table_name)
+    success, nchunks, nrows, _ = write_pandas(conn, df, table_name.upper())
     return success, nchunks, nrows
 
 # Main function
@@ -97,7 +97,7 @@ def main():
 
     for symbol in symbols:
         print(f"Processing {symbol}")
-        table_name = f'ohlcv_data_{symbol}'
+        table_name = f'ohlcv_data_{symbol}'.upper()
         last_date = get_last_date(conn, table_name)
         data = download_sp500_data(symbol, last_date, end_date)
         if not data.empty:
