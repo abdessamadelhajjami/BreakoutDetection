@@ -245,6 +245,8 @@ def detect_and_label_breakouts(df):
                 Breakout_indices.append(index)
                 Breakout_confirmed.append(confirmation_label)
                 Breakout_percentage.append(variation)
+    if 'Breakout_Confirmed' not in df.columns:
+        df['Breakout_Confirmed'] = pd.NA
     return df
 
 # Train and save the model
@@ -257,6 +259,8 @@ def train_and_save_model(session, table_name):
     df['Slope'] = [r[1] for r in results]
     df['Intercept'] = [r[2] for r in results]
     df = detect_and_label_breakouts(df)
+    if 'Breakout_Confirmed' not in df.columns:
+        print(f"Warning: 'Breakout_Confirmed' column not found in {table_name} after detection")
     Breakout_indices = df[df['Breakout_Confirmed'].notna()].index
     features = []
     labels = []
@@ -289,16 +293,6 @@ def train_and_save_model(session, table_name):
     joblib.dump(model, model_filename)
     session.file.put(model_filename, f"@YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename}")
     os.remove(model_filename)
-
-# Send Telegram notification
-def send_telegram_message(message):
-    payload = {
-        'chat_id': TELEGRAM_CHAT_ID,
-        'text': message
-    }
-    response = requests.post(TELEGRAM_API_URL, data=payload)
-    if response.status_code != 200:
-        print(f"Failed to send message: {response.text}")
 
 # Main function
 def main():
@@ -339,16 +333,19 @@ def main():
     #     data = download_sp500_data(symbol, start_date, end_date)
     #     data.reset_index(inplace=True)
         
-        # if not data.empty:
-        #     load_data_to_snowflake(session, data, table_name)
-        # else:
-        #     print(f"No new data for {symbol}")
+    #     if not data.empty:
+    #         load_data_to_snowflake(session, data, table_name)
+    #     else:
+    #         print(f"No new data for {symbol}")
     
     tables = session.sql(f"SELECT DISTINCT table_name FROM information_schema.tables WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'").collect()
     for table in tables:
         train_and_save_model(session, table['TABLE_NAME'])
         # Check for VH or VB
         df = session.table(table['TABLE_NAME']).to_pandas()
+        if 'Breakout_Confirmed' not in df.columns:
+            print(f"Warning: 'Breakout_Confirmed' column not found in {table['TABLE_NAME']}")
+            continue
         vh_vb = df[(df['Breakout_Confirmed'] == 'VH') | (df['Breakout_Confirmed'] == 'VB')]
         for _, row in vh_vb.iterrows():
             message = f"A True Bullish/Bearish breakout detected today for the action {table['TABLE_NAME']}: {row['Breakout_Confirmed']} on {row['Date']}"
@@ -357,7 +354,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
 
