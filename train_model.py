@@ -1,9 +1,11 @@
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from scipy import stats
 import snowflake.connector
 from snowflake.snowpark import Session
+from snowflake.connector.pandas_tools import write_pandas
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
@@ -11,6 +13,7 @@ from sklearn.preprocessing import StandardScaler
 import joblib
 import requests
 import os
+
 
 # Telegram bot configuration
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
@@ -33,15 +36,12 @@ def get_sp500_components():
     return df["Symbol"].tolist()
 
 # Download SP500 data
-def download_sp500_data(start, end):
-    symbols = get_sp500_components()
-    data = {}
-    for symbol in symbols:
-        data[symbol] = yf.download(symbol, start=start, end=end)
+def download_sp500_data(symbol, start, end):
+    data = yf.download(symbol, start=start, end=end)
     return data
 
 # Load data into Snowflake
-def load_data_to_snowflake(data):
+def load_data_to_snowflake(data, table_name):
     conn = snowflake.connector.connect(
         user=SNOWFLAKE_CONN['user'],
         password=SNOWFLAKE_CONN['password'],
@@ -50,15 +50,11 @@ def load_data_to_snowflake(data):
         database=SNOWFLAKE_CONN['database'],
         schema=SNOWFLAKE_CONN['schema']
     )
-
-    for symbol, df in data.items():
-        df.reset_index(inplace=True)
-        df.columns = [col.replace(' ', '_') for col in df.columns]
-        df['Date'] = df['Date'].astype(str)
-        table_name = f'ohlcv_data_{symbol}'.upper()
-        create_table_if_not_exists(conn, table_name)
-        write_pandas(conn, df, table_name)
-
+    df = data.reset_index()
+    df.columns = [col.replace(' ', '_') for col in df.columns]
+    df['Date'] = df['Date'].astype(str)
+    create_table_if_not_exists(conn, table_name)
+    write_pandas(conn, df, table_name)
     conn.close()
 
 def create_table_if_not_exists(conn, table_name):
@@ -75,6 +71,36 @@ def create_table_if_not_exists(conn, table_name):
         )
     """)
     cursor.close()
+
+# Check if table exists
+def table_exists(conn, table_name):
+    query = f"""
+    SELECT COUNT(*)
+    FROM information_schema.tables 
+    WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'
+    AND table_name = '{table_name.upper()}';
+    """
+    cursor = conn.cursor()
+    cursor.execute(query)
+    result = cursor.fetchone()[0]
+    cursor.close()
+    return result > 0
+
+# Get the last date from the table
+def get_last_date(conn, table_name):
+    if not table_exists(conn, table_name):
+        return '2010-01-01'
+    
+    query = f'SELECT MAX("Date") FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
+    cursor = conn.cursor()
+    cursor.execute(query)
+    last_date = cursor.fetchone()[0]
+    cursor.close()
+    
+    if last_date is None:
+        return '2010-01-01'
+    else:
+        return (pd.to_datetime(last_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
 
 # Calculate pivot reversals
 def calculate_pivot_reversals(df, window=3):
@@ -321,11 +347,26 @@ def main():
         'schema': SNOWFLAKE_CONN['schema']
     }
     session = Session.builder.configs(connection_parameters).create()
-    start_date = '2010-01-01'
+    symbols = get_sp500_components()
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
-    data = download_sp500_data(start_date, end_date)
-    load_data_to_snowflake(data)
-    tables = session.sql("SELECT DISTINCT 'OHLCV_DATA_' || Symbol AS table_name FROM SP500_HISTORIQUE").collect()
+
+    for symbol in symbols:
+        table_name = f'ohlcv_data_{symbol}'.upper()
+        conn = snowflake.connector.connect(
+            user=SNOWFLAKE_CONN['user'],
+            password=SNOWFLAKE_CONN['password'],
+            account=SNOWFLAKE_CONN['account'],
+            warehouse=SNOWFLAKE_CONN['warehouse'],
+            database=SNOWFLAKE_CONN['database'],
+            schema=SNOWFLAKE_CONN['schema']
+        )
+        last_date = get_last_date(conn, table_name)
+        conn.close()
+        data = download_sp500_data(symbol, last_date, end_date)
+        if not data.empty:
+            load_data_to_snowflake(data, table_name)
+
+    tables = session.sql("SELECT DISTINCT 'OHLCV_DATA_' || Symbol AS table_name FROM SP500").collect()
     for table in tables:
         train_and_save_model(session, table['TABLE_NAME'])
         # Check for VH or VB
@@ -338,5 +379,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
