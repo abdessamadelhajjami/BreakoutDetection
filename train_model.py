@@ -53,8 +53,9 @@ def load_data_to_snowflake(data, symbol, table_name):
     )
     cursor = conn.cursor()
 
+    cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
     cursor.execute(f"""
-        CREATE OR REPLACE TABLE {table_name} (
+        CREATE TABLE {table_name} (
             Date DATE, 
             Open FLOAT, 
             High FLOAT, 
@@ -64,19 +65,8 @@ def load_data_to_snowflake(data, symbol, table_name):
             Volume FLOAT
         )
     """)
-
-    # Get the latest date from the table
-    cursor.execute(f"SELECT MAX(Date) FROM {table_name}")
-    result = cursor.fetchone()
-    max_date = result[0]
-
-    # Filter data to only include rows after the max_date
-    if max_date:
-        data = data[data['Date'] > max_date]
-
-    if not data.empty:
-        write_pandas(conn, data, table_name)
-
+    success, nchunks, nrows, _ = snowflake.connector.pandas_tools.write_pandas(conn, data, table_name)
+    print(f"Loaded {nrows} rows into {table_name}")
     conn.close()
 
 # Calculate pivot reversals
