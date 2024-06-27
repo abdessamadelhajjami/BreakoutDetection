@@ -4,12 +4,12 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import snowflake.connector
-from snowflake.snowpark import Session
-from snowflake.connector.pandas_tools import write_pandas
+import snowflake.snowpark as snowpark
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
 from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
 import joblib
 import requests
 import os
@@ -30,7 +30,7 @@ SNOWFLAKE_CONN = {
 }
 
 
-# Function to get SP500 components
+# Functions to get SP500 components
 def get_sp500_components():
     df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
     return df["Symbol"].tolist()
@@ -41,66 +41,25 @@ def download_sp500_data(symbol, start, end):
     return data
 
 # Load data into Snowflake
-def load_data_to_snowflake(data, table_name):
-    conn = snowflake.connector.connect(
-        user=SNOWFLAKE_CONN['user'],
-        password=SNOWFLAKE_CONN['password'],
-        account=SNOWFLAKE_CONN['account'],
-        warehouse=SNOWFLAKE_CONN['warehouse'],
-        database=SNOWFLAKE_CONN['database'],
-        schema=SNOWFLAKE_CONN['schema']
-    )
-    df = data.reset_index()
-    df.columns = [col.replace(' ', '_') for col in df.columns]
-    df['Date'] = df['Date'].astype(str)
-    create_table_if_not_exists(conn, table_name)
-    write_pandas(conn, df, table_name)
-    conn.close()
-
-def create_table_if_not_exists(conn, table_name):
+def load_data_to_snowflake(conn, df, table_name):
+    df.reset_index(inplace=True)
     cursor = conn.cursor()
+
+    # Créer la table si elle n'existe pas
     cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS "{SNOWFLAKE_CONN['schema']}"."{table_name}" (
-            "Date" DATE, 
-            "Open" FLOAT, 
-            "High" FLOAT, 
-            "Low" FLOAT, 
-            "Close" FLOAT, 
-            "Adj_Close" FLOAT, 
-            "Volume" FLOAT
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            Date DATE, 
+            Open FLOAT, 
+            High FLOAT, 
+            Low FLOAT, 
+            Close FLOAT, 
+            Adj_Close FLOAT, 
+            Volume FLOAT
         )
     """)
-    cursor.close()
 
-# Check if table exists
-def table_exists(conn, table_name):
-    query = f"""
-    SELECT COUNT(*)
-    FROM information_schema.tables 
-    WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'
-    AND table_name = '{table_name.upper()}';
-    """
-    cursor = conn.cursor()
-    cursor.execute(query)
-    result = cursor.fetchone()[0]
-    cursor.close()
-    return result > 0
-
-# Get the last date from the table
-def get_last_date(conn, table_name):
-    if not table_exists(conn, table_name):
-        return '2010-01-01'
-    
-    query = f'SELECT MAX("Date") FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
-    cursor = conn.cursor()
-    cursor.execute(query)
-    last_date = cursor.fetchone()[0]
-    cursor.close()
-    
-    if last_date is None:
-        return '2010-01-01'
-    else:
-        return (pd.to_datetime(last_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+    # Insérer les données dans la table
+    success, nchunks, nrows, _ = snowflake.connector.pandas_tools.write_pandas(conn, df, table_name)
 
 # Calculate pivot reversals
 def calculate_pivot_reversals(df, window=3):
@@ -124,8 +83,8 @@ def calculate_pivot_reversals(df, window=3):
 # Collect channel information
 def collect_channel(df, candle, backcandles, window=1):
     localdf = df[candle-backcandles-window:candle-window]
-    highs, idxhighs = localdf[localdf['SAR_Reversals'] == 1].High.values, localdf[localdf['SAR_Reversals'] == 1].High.index
-    lows, idxlows = localdf[localdf['SAR_Reversals'] == 2].Low.values, localdf[localdf['SAR_Reversals'] == 2].Low.index
+    highs, idxhighs = localdf[localdf['SAR Reversals'] == 1].High.values, localdf[localdf['SAR Reversals'] == 1].High.index
+    lows, idxlows = localdf[localdf['SAR Reversals'] == 2].Low.values, localdf[localdf['SAR Reversals'] == 2].Low.index
     if len(lows) >= 2 and len(highs) >= 2:
         sl_lows, interc_lows, _, _, _ = stats.linregress(idxlows, lows)
         sl_highs, interc_highs, _, _, _ = stats.linregress(idxhighs, highs)
@@ -177,7 +136,7 @@ def isBreakOut(df, candle, window=1):
 def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
     if breakout_index + confirmation_candles >= len(df):
         return None, None
-    breakout_type = df.loc[breakout_index, 'Breakout_Type']
+    breakout_type = df.loc[breakout_index, 'Breakout Type']
     breakout_price = df.loc[breakout_index, 'Intercept']
     last_confirmed_price = df.iloc[breakout_index + confirmation_candles]['Close']
     price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
@@ -265,7 +224,7 @@ def extract_and_flatten_features(candle, df):
     normalized_data['Norm_Keltner_Low'] = (data_window['Keltner_Low'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
     normalized_data['Slope'] = df['Slope'].iloc[candle]
     normalized_data['Intercept'] = df['Intercept'].iloc[candle]
-    normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
+    normalized_data['Breakout_Type'] = df['Breakout Type'].iloc[candle]
     flattened_features = normalized_data.values.flatten().tolist()
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
@@ -277,7 +236,7 @@ def detect_and_label_breakouts(df):
     Breakout_percentage = []
 
     for index in df.index:
-        if df.loc[index, 'Breakout_Type'] in [1, 2]:
+        if df.loc[index, 'Breakout Type'] in [1, 2]:
             result = confirm_breakout(df, index)
             if result:
                 confirmation_label, variation = result
@@ -292,9 +251,9 @@ def detect_and_label_breakouts(df):
 def train_and_save_model(session, table_name):
     df = session.table(table_name).to_pandas()
     df = calculate_all_indicators(df)
-    df['SAR_Reversals'] = calculate_pivot_reversals(df)
+    df['SAR Reversals'] = calculate_pivot_reversals(df)
     results = [isBreakOut(df, i) for i in range(len(df))]
-    df['Breakout_Type'] = [r[0] for r in results]
+    df['Breakout Type'] = [r[0] for r in results]
     df['Slope'] = [r[1] for r in results]
     df['Intercept'] = [r[2] for r in results]
     df = detect_and_label_breakouts(df)
@@ -310,6 +269,11 @@ def train_and_save_model(session, table_name):
         print(f"No valid data to train for {table_name}")
         return
     X, y = np.array(features), np.array(labels)
+    
+    # Imputer to handle NaN values
+    imputer = SimpleImputer(strategy='mean')
+    X = imputer.fit_transform(X)
+    
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
@@ -346,29 +310,41 @@ def main():
         'database': SNOWFLAKE_CONN['database'],
         'schema': SNOWFLAKE_CONN['schema']
     }
-    session = Session.builder.configs(connection_parameters).create()
+    session = snowpark.Session.builder.configs(connection_parameters).create()
+    
     # symbols = get_sp500_components()
+    # start_date = '2010-01-01'
     # end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
 
     # for symbol in symbols:
-    #     table_name = f'ohlcv_data_{symbol}'.upper()
-    #     conn = snowflake.connector.connect(
-    #         user=SNOWFLAKE_CONN['user'],
-    #         password=SNOWFLAKE_CONN['password'],
-    #         account=SNOWFLAKE_CONN['account'],
-    #         warehouse=SNOWFLAKE_CONN['warehouse'],
-    #         database=SNOWFLAKE_CONN['database'],
-    #         schema=SNOWFLAKE_CONN['schema']
-    #     )
-    #     last_date = get_last_date(conn, table_name)
-    #     conn.close()
-    #     data = download_sp500_data(symbol, last_date, end_date)
-    #     if not data.empty:
-    #         load_data_to_snowflake(data, table_name)
+    #     print(f"Processing {symbol}")
+    #     table_name = f"ohlcv_data_{symbol}"
+        
+    #     # Check if table exists and get the max date
+    #     result = session.sql(f"""
+    #         SELECT COUNT(*) 
+    #         FROM information_schema.tables 
+    #         WHERE table_schema = '{SNOWFLAKE_CONN['schema']}' 
+    #           AND table_name = '{table_name.upper()}'
+    #     """).collect()
 
-
+    #     if result[0][0] > 0:
+    #         max_date_result = session.sql(f"""
+    #             SELECT MAX(Date) FROM {SNOWFLAKE_CONN['schema']}.{table_name}
+    #         """).collect()
+    #         max_date = max_date_result[0][0]
+    #         start_date = (pd.Timestamp(max_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+        
+    #     # Download data
+    #     data = download_sp500_data(symbol, start_date, end_date)
+    #     data.reset_index(inplace=True)
+        
+        # if not data.empty:
+        #     load_data_to_snowflake(session, data, table_name)
+        # else:
+        #     print(f"No new data for {symbol}")
+    
     tables = session.sql(f"SELECT DISTINCT table_name FROM information_schema.tables WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'").collect()
-
     for table in tables:
         train_and_save_model(session, table['TABLE_NAME'])
         # Check for VH or VB
@@ -381,6 +357,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
