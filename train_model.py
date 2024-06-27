@@ -42,7 +42,7 @@ def get_last_date(conn, table_name):
     if not table_exists(conn, table_name):
         return '2010-01-01'
     
-    query = f'SELECT MAX("Date") FROM {table_name}'
+    query = f"SELECT MAX(Date) FROM {table_name}"
     cursor = conn.cursor()
     cursor.execute(query)
     last_date = cursor.fetchone()[0]
@@ -58,13 +58,13 @@ def create_table_if_not_exists(conn, table_name):
     cursor = conn.cursor()
     cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS {table_name} (
-            "Date" DATE, 
-            "Open" FLOAT, 
-            "High" FLOAT, 
-            "Low" FLOAT, 
-            "Close" FLOAT, 
-            "Adj_Close" FLOAT, 
-            "Volume" FLOAT
+            Date DATE, 
+            Open FLOAT, 
+            High FLOAT, 
+            Low FLOAT, 
+            Close FLOAT, 
+            Adj_Close FLOAT, 
+            Volume FLOAT
         )
     """)
     cursor.close()
@@ -105,6 +105,12 @@ def main():
             print(f"Data loaded: {success}, {nchunks} chunks, {nrows} rows")
         else:
             print(f"No new data for {symbol}")
+
+    conn.close()
+
+if __name__ == "__main__":
+    main()
+
 
     conn.close()
 
