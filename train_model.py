@@ -71,7 +71,7 @@ def get_last_date(conn, table_name):
 
 # Load data into Snowflake
 def load_data_to_snowflake(conn, df, table_name):
-    if not True:# table_exists(conn, table_name):
+    if not table_exists(conn, table_name):
         cursor = conn.cursor()
         cursor.execute(f"""
             CREATE TABLE {table_name} (
@@ -85,8 +85,8 @@ def load_data_to_snowflake(conn, df, table_name):
             )
         """)
         
-    
-    success, nchunks, nrows, _ = write_pandas(conn, df, "ohlcv_data_MMM")
+    print(table_name)
+    success, nchunks, nrows, _ = write_pandas(conn, df, table_name)
     print(f"Data inserted into {table_name}: {success}, {nchunks} chunks, {nrows} rows")
     cursor.close()
 
