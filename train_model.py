@@ -366,7 +366,8 @@ def main():
         if not data.empty:
             load_data_to_snowflake(data, table_name)
 
-    tables = session.sql("SELECT DISTINCT 'OHLCV_DATA_' || Symbol AS table_name FROM SP500").collect()
+    tables = session.sql(f"SELECT DISTINCT 'OHLCV_DATA_' || Symbol AS table_name FROM BREAKOUDETECTIONDB.SP500").collect()
+
     for table in tables:
         train_and_save_model(session, table['TABLE_NAME'])
         # Check for VH or VB
