@@ -77,6 +77,9 @@ def load_data_to_snowflake(conn, df, table_name):
     # Reset the index
     df.reset_index(inplace=True)
     
+    # Rename columns to avoid invalid identifiers
+    df.columns = [col.replace(' ', '_') for col in df.columns]
+    
     # Insert data using `write_pandas`
     success, nchunks, nrows, _ = write_pandas(conn, df, table_name.upper())
     return success, nchunks, nrows
@@ -110,3 +113,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
