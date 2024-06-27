@@ -1,10 +1,10 @@
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from scipy import stats
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
-from snowflake.snowpark import Session
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
@@ -35,16 +35,14 @@ def get_sp500_components():
     return df["Symbol"].tolist()
 
 # Download SP500 data
-def download_sp500_data(start, end):
-    symbols = get_sp500_components()
-    data = {}
-    for symbol in symbols:
-        data[symbol] = yf.download(symbol, start=start, end=end)
-        data[symbol].to_csv(f'ohlcv_data_{symbol}.csv')
-    return data
+def download_sp500_data(symbol, start, end):
+    df = yf.download(symbol, start=start, end=end)
+    df.reset_index(inplace=True)
+    df.to_csv(f'ohlcv_data_{symbol}.csv', index=False)
+    return df
 
 # Load data into Snowflake
-def load_data_to_snowflake(data):
+def load_data_to_snowflake(data, symbol, table_name):
     conn = snowflake.connector.connect(
         user=SNOWFLAKE_CONN['user'],
         password=SNOWFLAKE_CONN['password'],
@@ -55,26 +53,29 @@ def load_data_to_snowflake(data):
     )
     cursor = conn.cursor()
 
-    for symbol, df in data.items():
-        df.reset_index(inplace=True)
-        table_name = f'ohlcv_data_{symbol}'
-        
-        # Create the table if it does not exist
-        cursor.execute(f"""
-            CREATE OR REPLACE TABLE {table_name} (
-                Date DATE, 
-                Open FLOAT, 
-                High FLOAT, 
-                Low FLOAT, 
-                Close FLOAT, 
-                Adj_Close FLOAT, 
-                Volume FLOAT
-            )
-        """)
-        
-        # Use write_pandas to insert the entire DataFrame
-        success, nchunks, nrows, _ = write_pandas(conn, df, table_name)
-        print(f"Inserted {nrows} rows into {table_name}. Success: {success}")
+    cursor.execute(f"""
+        CREATE OR REPLACE TABLE {table_name} (
+            Date DATE, 
+            Open FLOAT, 
+            High FLOAT, 
+            Low FLOAT, 
+            Close FLOAT, 
+            Adj_Close FLOAT, 
+            Volume FLOAT
+        )
+    """)
+
+    # Get the latest date from the table
+    cursor.execute(f"SELECT MAX(Date) FROM {table_name}")
+    result = cursor.fetchone()
+    max_date = result[0]
+
+    # Filter data to only include rows after the max_date
+    if max_date:
+        data = data[data['Date'] > max_date]
+
+    if not data.empty:
+        write_pandas(conn, data, table_name)
 
     conn.close()
 
@@ -322,16 +323,33 @@ def main():
         'database': SNOWFLAKE_CONN['database'],
         'schema': SNOWFLAKE_CONN['schema']
     }
-    session = Session.builder.configs(connection_parameters).create()
+    session = snowflake.connector.connect(**connection_parameters)
+
     start_date = '2010-01-01'
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
-    data = download_sp500_data(start_date, end_date)
-    load_data_to_snowflake(data)
-    tables = session.sql("SELECT DISTINCT 'OHLCV_DATA_' || Symbol AS table_name FROM SP500_HISTORIQUE").collect()
+
+    symbols = get_sp500_components()
+    for symbol in symbols:
+        table_name = f'ohlcv_data_{symbol}'
+        cursor = session.cursor()
+
+        # Get the latest date from the table
+        cursor.execute(f"SELECT MAX(Date) FROM {table_name}")
+        result = cursor.fetchone()
+        max_date = result[0] if result[0] else start_date
+
+        # Download data starting from the day after the max_date
+        data = download_sp500_data(symbol, max_date, end_date)
+
+        # Load data to Snowflake
+        load_data_to_snowflake(data, symbol, table_name)
+
+    tables = session.cursor().execute("SELECT DISTINCT 'OHLCV_DATA_' || Symbol AS table_name FROM SP500_HISTORIQUE").fetchall()
     for table in tables:
         train_and_save_model(session, table['TABLE_NAME'])
-        # Check for VH or VB
-        df = session.table(table['TABLE_NAME']).to_pandas()
+        df = session.cursor().execute(f"SELECT * FROM {table['TABLE_NAME']}").fetchall()
+        df = pd.DataFrame(df, columns=[col[0] for col in cursor.description])
+
         vh_vb = df[(df['Breakout_Confirmed'] == 'VH') | (df['Breakout_Confirmed'] == 'VB')]
         for _, row in vh_vb.iterrows():
             message = f"A True Bullish/Bearish breakout detected today for the action {table['TABLE_NAME']}: {row['Breakout_Confirmed']} on {row['Date']}"
@@ -340,5 +358,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
