@@ -71,10 +71,10 @@ def get_last_date(conn, table_name):
 
 # Load data into Snowflake
 def load_data_to_snowflake(conn, df, table_name):
-    if not table_exists(conn, table_name):
+    if not True:# table_exists(conn, table_name):
         cursor = conn.cursor()
         cursor.execute(f"""
-            CREATE TABLE {table_name[1:-1]} (
+            CREATE TABLE {table_name} (
                 Date DATE, 
                 Open FLOAT, 
                 High FLOAT, 
@@ -84,10 +84,11 @@ def load_data_to_snowflake(conn, df, table_name):
                 Volume FLOAT
             )
         """)
-        cursor.close()
+        
     
-    success, nchunks, nrows, _ = write_pandas(conn, df, table_name[1:-1])
+    success, nchunks, nrows, _ = write_pandas(conn, df, table_name)
     print(f"Data inserted into {table_name}: {success}, {nchunks} chunks, {nrows} rows")
+    cursor.close()
 
 # Calculate pivot reversals
 def calculate_pivot_reversals(df, window=3):
