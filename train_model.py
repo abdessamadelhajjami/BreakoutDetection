@@ -74,7 +74,7 @@ def load_data_to_snowflake(conn, df, table_name):
     if not table_exists(conn, table_name):
         cursor = conn.cursor()
         cursor.execute(f"""
-            CREATE TABLE {table_name} (
+            CREATE TABLE {table_name[1:-1]} (
                 Date DATE, 
                 Open FLOAT, 
                 High FLOAT, 
