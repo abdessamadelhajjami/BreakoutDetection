@@ -36,38 +36,58 @@ def get_sp500_components():
 
 # Download SP500 data
 def download_sp500_data(symbol, start, end):
-    df = yf.download(symbol, start=start, end=end)
-    df.reset_index(inplace=True)
-    return df
+    data = yf.download(symbol, start=start, end=end)
+    return data
+
+# Check if table exists
+def table_exists(conn, table_name):
+    query = f"""
+    SELECT COUNT(*)
+    FROM information_schema.tables 
+    WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'
+    AND table_name = '{table_name.upper()}';
+    """
+    cursor = conn.cursor()
+    cursor.execute(query)
+    result = cursor.fetchone()[0]
+    cursor.close()
+    return result > 0
+
+# Get the last date from the table
+def get_last_date(conn, table_name):
+    if not table_exists(conn, table_name):
+        return '2010-01-01'
+    
+    query = f"SELECT MAX(Date) FROM {table_name}"
+    cursor = conn.cursor()
+    cursor.execute(query)
+    last_date = cursor.fetchone()[0]
+    cursor.close()
+    
+    if last_date is None:
+        return '2010-01-01'
+    else:
+        return (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
 
 # Load data into Snowflake
 def load_data_to_snowflake(conn, df, table_name):
-    cursor = conn.cursor()
-    # Create table if it doesn't exist
-    cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS {table_name} (
-            Date DATE, 
-            Open FLOAT, 
-            High FLOAT, 
-            Low FLOAT, 
-            Close FLOAT, 
-            Adj_Close FLOAT, 
-            Volume FLOAT
-        )
-    """)
-    # Insert data
+    if not table_exists(conn, table_name):
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            CREATE TABLE {table_name} (
+                Date DATE, 
+                Open FLOAT, 
+                High FLOAT, 
+                Low FLOAT, 
+                Close FLOAT, 
+                Adj_Close FLOAT, 
+                Volume FLOAT
+            )
+        """)
+        cursor.close()
+    
     success, nchunks, nrows, _ = write_pandas(conn, df, table_name)
-    print(f"Loaded {nrows} rows into {table_name}")
-
-# Get the last date of data in Snowflake table
-def get_last_date(conn, table_name):
-    cursor = conn.cursor()
-    try:
-        cursor.execute(f"SELECT MAX(Date) FROM {table_name}")
-        result = cursor.fetchone()
-        return result[0] if result[0] else '2010-01-01'
-    except Exception as e:
-        return '2010-01-01'
+    print(f"Data inserted into {table_name}: {success}, {nchunks} chunks, {nrows} rows")
 
 # Calculate pivot reversals
 def calculate_pivot_reversals(df, window=3):
@@ -324,21 +344,23 @@ def main():
         table_name = f'ohlcv_data_{symbol}'
         last_date = get_last_date(conn, table_name)
         data = download_sp500_data(symbol, last_date, end_date)
-        load_data_to_snowflake(conn, data, table_name)
+        if not data.empty:
+            load_data_to_snowflake(conn, data, table_name)
 
-        # Train and save the model
-        train_and_save_model(session, table_name)
+            # Train and save the model
+            train_and_save_model(session, table_name)
 
-        # Check for VH or VB
-        df = session.table(table_name).to_pandas()
-        vh_vb = df[(df['Breakout_Confirmed'] == 'VH') | (df['Breakout_Confirmed'] == 'VB')]
-        for _, row in vh_vb.iterrows():
-            message = f"A True Bullish/Bearish breakout detected today for the action {symbol}: {row['Breakout_Confirmed']} on {row['Date']}"
-            send_telegram_message(message)
+            # Check for VH or VB
+            df = session.table(table_name).to_pandas()
+            vh_vb = df[(df['Breakout_Confirmed'] == 'VH') | (df['Breakout_Confirmed'] == 'VB')]
+            for _, row in vh_vb.iterrows():
+                message = f"A True Bullish/Bearish breakout detected today for the action {symbol}: {row['Breakout_Confirmed']} on {row['Date']}"
+                send_telegram_message(message)
+    
     session.close()
+    conn.close()
 
 if __name__ == "__main__":
     main()
-
 
 
