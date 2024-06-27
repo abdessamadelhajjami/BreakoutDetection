@@ -1,9 +1,9 @@
-
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from scipy import stats
 import snowflake.connector
+from snowflake.connector.pandas_tools import write_pandas
 from snowflake.snowpark import Session
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -28,7 +28,8 @@ SNOWFLAKE_CONN = {
     'schema': 'SP500',
 }
 
-# Function to get SP500 components
+
+# Functions to get SP500 components
 def get_sp500_components():
     df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
     return df["Symbol"].tolist()
@@ -57,6 +58,8 @@ def load_data_to_snowflake(data):
     for symbol, df in data.items():
         df.reset_index(inplace=True)
         table_name = f'ohlcv_data_{symbol}'
+        
+        # Create the table if it does not exist
         cursor.execute(f"""
             CREATE OR REPLACE TABLE {table_name} (
                 Date DATE, 
@@ -68,20 +71,11 @@ def load_data_to_snowflake(data):
                 Volume FLOAT
             )
         """)
+        
+        # Use write_pandas to insert the entire DataFrame
+        success, nchunks, nrows, _ = write_pandas(conn, df, table_name)
+        print(f"Inserted {nrows} rows into {table_name}. Success: {success}")
 
-        for _, row in df.iterrows():
-            cursor.execute(f"""
-                INSERT INTO {table_name} (Date, Open, High, Low, Close, Adj_Close, Volume) VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (
-                row['Date'].strftime('%Y-%m-%d'), 
-                row['Open'], 
-                row['High'], 
-                row['Low'], 
-                row['Close'], 
-                row['Adj Close'], 
-                row['Volume']
-            ))
-    conn.commit()
     conn.close()
 
 # Calculate pivot reversals
