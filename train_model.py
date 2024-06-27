@@ -1,10 +1,9 @@
-
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from scipy import stats
 import snowflake.connector
-from snowflake.connector.pandas_tools import write_pandas
+from snowflake.snowpark import Session
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
@@ -12,7 +11,6 @@ from sklearn.preprocessing import StandardScaler
 import joblib
 import requests
 import os
-
 
 # Telegram bot configuration
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
@@ -29,20 +27,22 @@ SNOWFLAKE_CONN = {
 }
 
 
-# Functions to get SP500 components
+# Function to get SP500 components
 def get_sp500_components():
     df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
     return df["Symbol"].tolist()
 
 # Download SP500 data
-def download_sp500_data(symbol, start, end):
-    df = yf.download(symbol, start=start, end=end)
-    df.reset_index(inplace=True)
-    df.to_csv(f'ohlcv_data_{symbol}.csv', index=False)
-    return df
+def download_sp500_data(start, end):
+    symbols = get_sp500_components()
+    data = {}
+    for symbol in symbols:
+        data[symbol] = yf.download(symbol, start=start, end=end)
+        data[symbol].to_csv(f'ohlcv_data_{symbol}.csv')
+    return data
 
 # Load data into Snowflake
-def load_data_to_snowflake(data, symbol, table_name):
+def load_data_to_snowflake(data):
     conn = snowflake.connector.connect(
         user=SNOWFLAKE_CONN['user'],
         password=SNOWFLAKE_CONN['password'],
@@ -53,20 +53,34 @@ def load_data_to_snowflake(data, symbol, table_name):
     )
     cursor = conn.cursor()
 
-    cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
-    cursor.execute(f"""
-        CREATE TABLE {table_name} (
-            Date DATE, 
-            Open FLOAT, 
-            High FLOAT, 
-            Low FLOAT, 
-            Close FLOAT, 
-            Adj_Close FLOAT, 
-            Volume FLOAT
-        )
-    """)
-    success, nchunks, nrows, _ = snowflake.connector.pandas_tools.write_pandas(conn, data, table_name)
-    print(f"Loaded {nrows} rows into {table_name}")
+    for symbol, df in data.items():
+        df.reset_index(inplace=True)
+        table_name = f'ohlcv_data_{symbol}'
+        cursor.execute(f"""
+            CREATE OR REPLACE TABLE {table_name} (
+                Date DATE, 
+                Open FLOAT, 
+                High FLOAT, 
+                Low FLOAT, 
+                Close FLOAT, 
+                Adj_Close FLOAT, 
+                Volume FLOAT
+            )
+        """)
+
+        for _, row in df.iterrows():
+            cursor.execute(f"""
+                INSERT INTO {table_name} (Date, Open, High, Low, Close, Adj_Close, Volume) VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
+                row['Date'].strftime('%Y-%m-%d'), 
+                row['Open'], 
+                row['High'], 
+                row['Low'], 
+                row['Close'], 
+                row['Adj Close'], 
+                row['Volume']
+            ))
+    conn.commit()
     conn.close()
 
 # Calculate pivot reversals
@@ -313,33 +327,16 @@ def main():
         'database': SNOWFLAKE_CONN['database'],
         'schema': SNOWFLAKE_CONN['schema']
     }
-    session = snowflake.connector.connect(**connection_parameters)
-
+    session = Session.builder.configs(connection_parameters).create()
     start_date = '2010-01-01'
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
-
-    symbols = get_sp500_components()
-    for symbol in symbols:
-        table_name = f'ohlcv_data_{symbol}'
-        cursor = session.cursor()
-
-        # Get the latest date from the table
-        cursor.execute(f"SELECT MAX(Date) FROM {table_name}")
-        result = cursor.fetchone()
-        max_date = result[0] if result[0] else start_date
-
-        # Download data starting from the day after the max_date
-        data = download_sp500_data(symbol, max_date, end_date)
-
-        # Load data to Snowflake
-        load_data_to_snowflake(data, symbol, table_name)
-
-    tables = session.cursor().execute("SELECT DISTINCT 'OHLCV_DATA_' || Symbol AS table_name FROM SP500_HISTORIQUE").fetchall()
+    data = download_sp500_data(start_date, end_date)
+    load_data_to_snowflake(data)
+    tables = session.sql("SELECT DISTINCT 'OHLCV_DATA_' || Symbol AS table_name FROM SP500_HISTORIQUE").collect()
     for table in tables:
         train_and_save_model(session, table['TABLE_NAME'])
-        df = session.cursor().execute(f"SELECT * FROM {table['TABLE_NAME']}").fetchall()
-        df = pd.DataFrame(df, columns=[col[0] for col in cursor.description])
-
+        # Check for VH or VB
+        df = session.table(table['TABLE_NAME']).to_pandas()
         vh_vb = df[(df['Breakout_Confirmed'] == 'VH') | (df['Breakout_Confirmed'] == 'VB')]
         for _, row in vh_vb.iterrows():
             message = f"A True Bullish/Bearish breakout detected today for the action {table['TABLE_NAME']}: {row['Breakout_Confirmed']} on {row['Date']}"
@@ -348,6 +345,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 
