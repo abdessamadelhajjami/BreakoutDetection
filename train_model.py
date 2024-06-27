@@ -347,26 +347,26 @@ def main():
         'schema': SNOWFLAKE_CONN['schema']
     }
     session = Session.builder.configs(connection_parameters).create()
-    symbols = get_sp500_components()
-    end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
+    # symbols = get_sp500_components()
+    # end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
 
-    for symbol in symbols:
-        table_name = f'ohlcv_data_{symbol}'.upper()
-        conn = snowflake.connector.connect(
-            user=SNOWFLAKE_CONN['user'],
-            password=SNOWFLAKE_CONN['password'],
-            account=SNOWFLAKE_CONN['account'],
-            warehouse=SNOWFLAKE_CONN['warehouse'],
-            database=SNOWFLAKE_CONN['database'],
-            schema=SNOWFLAKE_CONN['schema']
-        )
-        last_date = get_last_date(conn, table_name)
-        conn.close()
-        data = download_sp500_data(symbol, last_date, end_date)
-        if not data.empty:
-            load_data_to_snowflake(data, table_name)
+    # for symbol in symbols:
+    #     table_name = f'ohlcv_data_{symbol}'.upper()
+    #     conn = snowflake.connector.connect(
+    #         user=SNOWFLAKE_CONN['user'],
+    #         password=SNOWFLAKE_CONN['password'],
+    #         account=SNOWFLAKE_CONN['account'],
+    #         warehouse=SNOWFLAKE_CONN['warehouse'],
+    #         database=SNOWFLAKE_CONN['database'],
+    #         schema=SNOWFLAKE_CONN['schema']
+    #     )
+    #     last_date = get_last_date(conn, table_name)
+    #     conn.close()
+    #     data = download_sp500_data(symbol, last_date, end_date)
+    #     if not data.empty:
+    #         load_data_to_snowflake(data, table_name)
 
-    tables = session.sql(f"SELECT DISTINCT 'OHLCV_DATA_' || Symbol AS table_name FROM BREAKOUDETECTIONDB.SP500").collect()
+    tables = session.sql(f"SELECT DISTINCT 'OHLCV_DATA_' || Symbol AS table_name FROM @BREAKOUDETECTIONDB.SP500").collect()
 
     for table in tables:
         train_and_save_model(session, table['TABLE_NAME'])
