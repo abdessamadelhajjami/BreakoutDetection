@@ -366,7 +366,8 @@ def main():
     #     if not data.empty:
     #         load_data_to_snowflake(data, table_name)
 
-    tables = session.sql(f"SELECT DISTINCT 'OHLCV_DATA_' || Symbol AS table_name FROM @BREAKOUDETECTIONDB.SP500").collect()
+
+    tables = session.sql(f"SELECT DISTINCT table_name FROM information_schema.tables WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'").collect()
 
     for table in tables:
         train_and_save_model(session, table['TABLE_NAME'])
