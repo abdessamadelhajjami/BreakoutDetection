@@ -85,9 +85,9 @@ def load_data_to_snowflake(conn, df, table_name):
             )
         """)
         
-    print(table_name)
-    success, nchunks, nrows, _ = write_pandas(conn, df, table_name)
-    print(f"Data inserted into {table_name}: {success}, {nchunks} chunks, {nrows} rows")
+    
+    write_pandas(conn, df, table_name)
+    print(f"Data inserted into {table_name}")
     cursor.close()
 
 # Calculate pivot reversals
