@@ -327,18 +327,26 @@ def main():
 
             model_filename = f"{table_name}_model.pkl"
             local_model_path = f"{model_filename}"
-            session.file.get(f"@YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename}", local_model_path)
+           # Initialize Snowflake session for file transfer
+            session = snowflake.connector.connect(
+                user=SNOWFLAKE_CONN['user'],
+                password=SNOWFLAKE_CONN['password'],
+                account=SNOWFLAKE_CONN['account'],
+                warehouse=SNOWFLAKE_CONN['warehouse'],
+                database=SNOWFLAKE_CONN['database'],
+                schema=SNOWFLAKE_CONN['schema']
+            )
+            session.cursor().execute(f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}")
+            
             model = joblib.load(local_model_path)
-            print("YEEP2")
             scaler = StandardScaler()
             features_scaled = scaler.fit_transform(features.reshape(1, -1))
+            print ("prediction vrai", prediction)
+            prediction ='VB'
             prediction = model.predict(features_scaled)
-            prediction = 'VB'
             if prediction[0] in ['VH', 'VB']:
-                print("YEEP3")
                 message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
                 send_telegram_message(message)
-        print("finish")
     
     conn.close()
 
