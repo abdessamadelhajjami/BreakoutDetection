@@ -219,14 +219,25 @@ def calculate_all_indicators(df):
     return df
 
 # Extract and flatten features
-def extract_and_flatten_features(candle, df):
+def extract_and_flatten_features(df, candle):
+    # Vérifiez que l'index de la bougie est un entier
+    if isinstance(candle, pd.Timestamp):
+        candle = candle.to_pydatetime().date()
+    
+    # Assurez-vous que 'candle' est un entier
+    if isinstance(candle, pd.DatetimeIndex):
+        candle = candle[-1].to_pydatetime().date()
+
     if candle < 14:
         return None
+
     data_window = df.iloc[candle-14:candle]
     normalized_data = pd.DataFrame()
+
     for period in [7, 20, 50, 200]:
         sma_key = f'SMA_{period}'
         normalized_data[f'Norm_{sma_key}'] = data_window[sma_key] / data_window['Close']
+
     normalized_data['Norm_MACD'] = (data_window['MACD'] - data_window['MACD'].mean()) / data_window['MACD'].std()
     normalized_data['Norm_RSI'] = (data_window['RSI'] - data_window['RSI'].mean()) / data_window['RSI'].std()
     normalized_data['Norm_Bollinger_Width'] = (data_window['Bollinger_High'] - data_window['Bollinger_Low']) / data_window['Bollinger_Mid']
@@ -236,9 +247,13 @@ def extract_and_flatten_features(candle, df):
     normalized_data['Slope'] = df['Slope'].iloc[candle]
     normalized_data['Intercept'] = df['Intercept'].iloc[candle]
     normalized_data['Breakout_Type'] = df['Breakout Type'].iloc[candle]
+
     flattened_features = normalized_data.values.flatten().tolist()
-    flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
+
+
+
+
 
 # Send Telegram notification
 def send_telegram_message(message):
@@ -291,6 +306,7 @@ def main():
         # Vérifier les breakouts pour aujourd'hui
         df = read_data_from_snowflake(conn, table_name)
         if df.empty:
+            print("base de donnée empy")
             continue
 
         df = calculate_all_indicators(df)
