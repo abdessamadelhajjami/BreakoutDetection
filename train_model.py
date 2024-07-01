@@ -89,6 +89,7 @@ def load_data_to_snowflake(conn, df, table_name):
     
     success, nchunks, nrows, _ = write_pandas(conn, df, f"{SNOWFLAKE_CONN['schema']}.{table_name.upper()}")
     return success, nchunks, nrows
+    
 # Detect breakout using isBreakOut
 def isBreakOut(df, candle, window=1):
     for backcandles in [14, 20, 40, 60]:  
@@ -116,6 +117,7 @@ def isBreakOut(df, candle, window=1):
             curr_close < (sl_lows * curr_idx + interc_lows)):
             return 1, sl_lows, interc_lows
     return 0, None, None
+
 
 # Collect channel information
 def collect_channel(df, candle, backcandles, window=1):
@@ -265,9 +267,7 @@ def send_telegram_message(message):
     if response.status_code != 200:
         print(f"Failed to send message: {response.text}")
 
-from sqlalchemy import create_engine
-from snowflake.sqlalchemy import URL
-import pandas as pd
+
 
 def read_data_from_snowflake(conn, table_name):
     query = f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
@@ -311,7 +311,9 @@ def main():
 
         df = calculate_all_indicators(df)
         today_idx = df.index[-1]
-        breakout_type, slope, intercept = 1 , 1.23 , 0.25 #isBreakOut(df, today_idx)
+        breakout_type, slope, intercept = isBreakOut(df, today_idx)
+        df['Breakout Type'], df['Slope'], df['Intercept'] = zip(*[isBreakOut(df, i) for i in range(len(df))])
+
         breakout_type = 1
         print("breakout type today is :", breakout_type)
         breakout_type = 1
