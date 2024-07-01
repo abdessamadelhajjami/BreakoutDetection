@@ -8,6 +8,7 @@ import joblib
 from sklearn.preprocessing import StandardScaler
 import requests
 import os 
+import tempfile
 
 
 # Telegram bot configuration
@@ -327,23 +328,23 @@ def main():
                 continue
 
             model_filename = f"{table_name}_model.pkl"
-            local_model_path = os.path.join(os.getcwd(), 'models')
-            if not os.path.exists(local_model_path):
-                os.makedirs(local_model_path)
-            local_model_path = os.path.join(local_model_path, model_filename)
-            
-            conn.cursor().execute(f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{local_model_path} file://{model_filename}")
 
-            model = joblib.load(local_model_path)
-            print("YEEP2")
-            scaler = StandardScaler()
-            features_scaled = scaler.fit_transform(features.reshape(1, -1))
-            prediction = model.predict(features_scaled)
-            print("prediction:", prediction)
-            if prediction[0] in ['VH', 'VB']:
-                print("YEEP3")
-                message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
-                send_telegram_message(message)
+            # Create a temporary directory
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                local_model_path = os.path.join(tmpdirname, model_filename)
+                
+                conn.cursor().execute(f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}")
+
+                model = joblib.load(local_model_path)
+                print("YEEP2")
+                scaler = StandardScaler()
+                features_scaled = scaler.fit_transform(features.reshape(1, -1))
+                prediction = model.predict(features_scaled)
+                
+                if prediction[0] in ['VH', 'VB']:
+                    print("YEEP3")
+                    message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
+                    send_telegram_message(message)
         print("finish")
 
     conn.close()
