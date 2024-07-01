@@ -1,27 +1,24 @@
 import requests
 
-# Remplacez par votre token de bot
-TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI"
+# Configuration du bot Telegram
+TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
+TELEGRAM_CHAT_ID = "-1002197712630"  # Utilisez l'ID de votre chat
 
-# Fonction pour obtenir les mises à jour du bot
-def get_updates():
-    response = requests.get(f"{TELEGRAM_API_URL}/getUpdates")
+# Fonction pour envoyer un message Telegram
+def send_telegram_message(message):
+    payload = {
+        'chat_id': TELEGRAM_CHAT_ID,
+        'text': message
+    }
+    response = requests.post(TELEGRAM_API_URL, data=payload)
     if response.status_code == 200:
-        updates = response.json()
-        print(updates)
-        return updates
+        print("Message envoyé avec succès")
     else:
-        print(f"Échec de l'obtention des mises à jour: {response.text}")
-        return None
+        print(f"Échec de l'envoi du message: {response.text}")
 
-# Tester l'obtention de mises à jour
+# Tester l'envoi de message
 if __name__ == "__main__":
-    updates = get_updates()
-    if updates and "result" in updates and len(updates["result"]) > 0:
-        for update in updates["result"]:
-            print(update)
-    else:
-        print("Aucune mise à jour trouvée.")
+    send_telegram_message("Test: Ceci est un message de test pour vérifier que le bot fonctionne correctement.")
 
 
 
