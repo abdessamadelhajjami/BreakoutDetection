@@ -97,6 +97,77 @@ def load_data_to_snowflake(conn, df, table_name):
     success, nchunks, nrows, _ = write_pandas(conn, df, table_name.upper())
     return success, nchunks, nrows
 
+# Detect breakout using isBreakOut
+def isBreakOut(df, candle, window=1):
+    for backcandles in [14, 20, 40, 60]:  
+        if (candle - backcandles - window) < 0:
+            continue
+        try:
+            sl_lows, interc_lows, sl_highs, interc_highs, _, _ = collect_channel(df, candle, backcandles, window)
+            if sl_lows == 0 and sl_highs == 0:
+                continue
+        except:
+            continue
+        prev_idx, curr_idx = candle - 1, candle
+        prev_high, prev_low, prev_close = df.iloc[prev_idx]['High'], df.iloc[prev_idx]['Low'], df.iloc[prev_idx]['Close']
+        curr_high, curr_low, curr_close, curr_open = df.iloc[candle]['High'], df.iloc[candle]['Low'], df.iloc[candle]['Close'], df.iloc[candle]['Open']
+        if (not line_crosses_candles(df, sl_highs, interc_highs, candle-backcandles, candle-1) and 
+            prev_low < (sl_highs * prev_idx + interc_highs) and
+            prev_close > (sl_highs * prev_idx + interc_highs) and
+            curr_open > (sl_highs * curr_idx + interc_highs) and
+            curr_close > (sl_highs * curr_idx + interc_highs)):
+            return 2, sl_highs, interc_highs
+        if (not line_crosses_candles(df, sl_lows, interc_lows, candle-backcandles, candle-1) and
+            prev_high > (sl_lows * prev_idx + interc_lows) and
+            prev_close < (sl_lows * prev_idx + interc_lows) and
+            curr_open < (sl_lows * curr_idx + interc_lows) and
+            curr_close < (sl_lows * curr_idx + interc_lows)):
+            return 1, sl_lows, interc_lows
+    return 0, None, None
+
+# Collect channel information
+def collect_channel(df, candle, backcandles, window=1):
+    localdf = df[candle-backcandles-window:candle-window]
+    highs, idxhighs = localdf[localdf['SAR_Reversals'] == 1].High.values, localdf[localdf['SAR_Reversals'] == 1].High.index
+    lows, idxlows = localdf[localdf['SAR_Reversals'] == 2].Low.values, localdf[localdf['SAR_Reversals'] == 2].Low.index
+    if len(lows) >= 2 and len(highs) >= 2:
+        sl_lows, interc_lows, _, _, _ = stats.linregress(idxlows, lows)
+        sl_highs, interc_highs, _, _, _ = stats.linregress(idxhighs, highs)
+        return sl_lows, interc_lows, sl_highs, interc_highs, 0, 0
+    else:
+        return 0, 0, 0, 0, 0, 0
+
+# Check if the line crosses candles
+def line_crosses_candles(data, slope, intercept, start_index, end_index):
+    body_crosses = 0
+    for i in range(start_index, end_index + 1):
+        candle = data.iloc[i]
+        predicted_price = intercept + slope * (i - start_index)
+        open_price, close_price = candle['Open'], candle['Close']
+        body_high, body_low = max(open_price, close_price), min(open_price, close_price)
+        if body_low <= predicted_price <= body_high:
+            body_crosses += 1
+    return body_crosses > 1
+
+# Calculate pivot reversals
+def calculate_pivot_reversals(df, window=3):
+    pivot_series = pd.Series([0]*len(df), index=df.index)
+    for candle in range(window, len(df) - window):
+        pivotHigh, pivotLow = True, True
+        current_high, current_low = df.iloc[candle]['High'], df.iloc[candle]['Low']
+        for i in range(candle-window, candle+window+1):
+            if df.iloc[i]['Low'] < current_low:
+                pivotLow = False
+            if df.iloc[i]['High'] > current_high:
+                pivotHigh = False
+        if pivotHigh and pivotLow:
+            pivot_series[candle] = 3  
+        elif pivotHigh:
+            pivot_series[candle] = 2
+        elif pivotLow:
+            pivot_series[candle] = 1
+    return pivot_series
+
 # Calculate indicators
 def calculate_all_indicators(df):
     df = calculate_sma(df, [7, 20, 50, 200])
@@ -153,96 +224,6 @@ def calculate_keltner_channel(df, ema_period=20, atr_period=20, multiplier=2):
     df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']
     return df
 
-# Calculate pivot reversals
-def calculate_pivot_reversals(df, window=3):
-    pivot_series = pd.Series([0]*len(df), index=df.index)
-    for candle in range(window, len(df) - window):
-        pivotHigh, pivotLow = True, True
-        current_high, current_low = df.iloc[candle]['High'], df.iloc[candle]['Low']
-        for i in range(candle-window, candle+window+1):
-            if df.iloc[i]['Low'] < current_low:
-                pivotLow = False
-            if df.iloc[i]['High'] > current_high:
-                pivotHigh = False
-        if pivotHigh and pivotLow:
-            pivot_series[candle] = 3  
-        elif pivotHigh:
-            pivot_series[candle] = 2
-        elif pivotLow:
-            pivot_series[candle] = 1
-    return pivot_series
-
-# Collect channel information
-def collect_channel(df, candle, backcandles, window=1):
-    localdf = df[candle-backcandles-window:candle-window]
-    highs, idxhighs = localdf[localdf['SAR Reversals'] == 1].High.values, localdf[localdf['SAR Reversals'] == 1].High.index
-    lows, idxlows = localdf[localdf['SAR Reversals'] == 2].Low.values, localdf[localdf['SAR Reversals'] == 2].Low.index
-    if len(lows) >= 2 and len(highs) >= 2:
-        sl_lows, interc_lows, _, _, _ = stats.linregress(idxlows, lows)
-        sl_highs, interc_highs, _, _, _ = stats.linregress(idxhighs, highs)
-        return sl_lows, interc_lows, sl_highs, interc_highs, 0, 0
-    else:
-        return 0, 0, 0, 0, 0, 0
-
-# Check if the line crosses candles
-def line_crosses_candles(data, slope, intercept, start_index, end_index):
-    body_crosses = 0
-    for i in range(start_index, end_index + 1):
-        candle = data.iloc[i]
-        predicted_price = intercept + slope * (i - start_index)
-        open_price, close_price = candle['Open'], candle['Close']
-        body_high, body_low = max(open_price, close_price), min(open_price, close_price)
-        if body_low <= predicted_price <= body_high:
-            body_crosses += 1
-    return body_crosses > 1
-
-# Detect breakouts
-def isBreakOut(df, candle, window=1):
-    for backcandles in [14, 20, 40, 60]:  
-        if (candle - backcandles - window) < 0:
-            continue
-        try:
-            sl_lows, interc_lows, sl_highs, interc_highs, _, _ = collect_channel(df, candle, backcandles, window)
-            if sl_lows == 0 and sl_highs == 0:
-                continue
-        except:
-            continue
-        prev_idx, curr_idx = candle - 1, candle
-        prev_high, prev_low, prev_close = df.iloc[prev_idx]['High'], df.iloc[prev_idx]['Low'], df.iloc[prev_idx]['Close']
-        curr_high, curr_low, curr_close, curr_open = df.iloc[candle]['High'], df.iloc[candle]['Low'], df.iloc[candle]['Close'], df.iloc[candle]['Open']
-        if (not line_crosses_candles(df, sl_highs, interc_highs, candle-backcandles, candle-1) and 
-            prev_low < (sl_highs * prev_idx + interc_highs) and
-            prev_close > (sl_highs * prev_idx + interc_highs) and
-            curr_open > (sl_highs * curr_idx + interc_highs) and
-            curr_close > (sl_highs * curr_idx + interc_highs)):
-            return 2, sl_highs, interc_highs
-        if (not line_crosses_candles(df, sl_lows, interc_lows, candle-backcandles, candle-1) and
-            prev_high > (sl_lows * prev_idx + interc_lows) and
-            prev_close < (sl_lows * prev_idx + interc_lows) and
-            curr_open < (sl_lows * curr_idx + interc_lows) and
-            curr_close < (sl_lows * curr_idx + interc_lows)):
-            return 1, sl_lows, interc_lows
-    return 0, None, None
-
-# Confirm breakout
-def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
-    if breakout_index + confirmation_candles >= len(df):
-        return None, None
-    breakout_type = df.loc[breakout_index, 'Breakout Type']
-    breakout_price = df.loc[breakout_index, 'Intercept']
-    last_confirmed_price = df.iloc[breakout_index + confirmation_candles]['Close']
-    price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
-    if breakout_type == 1:
-        if price_variation_percentage <= -threshold_percentage:
-            return 'VB', price_variation_percentage
-        else:
-            return 'FB', price_variation_percentage
-    elif breakout_type == 2:
-        if price_variation_percentage >= threshold_percentage:
-            return 'VH', price_variation_percentage
-        else:
-            return 'FH', price_variation_percentage
-
 # Extract and flatten features
 def extract_and_flatten_features(candle, df):
     if candle < 14:
@@ -260,7 +241,7 @@ def extract_and_flatten_features(candle, df):
     normalized_data['Norm_Keltner_Low'] = (data_window['Keltner_Low'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
     normalized_data['Slope'] = df['Slope'].iloc[candle]
     normalized_data['Intercept'] = df['Intercept'].iloc[candle]
-    normalized_data['Breakout_Type'] = df['Breakout Type'].iloc[candle]
+    normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
     flattened_features = normalized_data.values.flatten().tolist()
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
@@ -277,14 +258,6 @@ def send_telegram_message(message):
 
 # Main function
 def main():
-    connection_parameters = {
-        'account': SNOWFLAKE_CONN['account'],
-        'user': SNOWFLAKE_CONN['user'],
-        'password': SNOWFLAKE_CONN['password'],
-        'warehouse': SNOWFLAKE_CONN['warehouse'],
-        'database': SNOWFLAKE_CONN['database'],
-        'schema': SNOWFLAKE_CONN['schema']
-    }
     conn = snowflake.connector.connect(
         user=SNOWFLAKE_CONN['user'],
         password=SNOWFLAKE_CONN['password'],
@@ -293,7 +266,7 @@ def main():
         database=SNOWFLAKE_CONN['database'],
         schema=SNOWFLAKE_CONN['schema']
     )
-
+    
     symbols = get_sp500_components()
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
 
@@ -308,39 +281,36 @@ def main():
         else:
             print(f"No new data for {symbol}")
 
-        # Detect breakouts for the latest day
-        if not data.empty:
-            df = calculate_all_indicators(data)
-            df['SAR Reversals'] = calculate_pivot_reversals(df)
-            results = [isBreakOut(df, i) for i in range(len(df))]
-            df['Breakout Type'] = [r[0] for r in results]
-            df['Slope'] = [r[1] for r in results]
-            df['Intercept'] = [r[2] for r in results]
+    for symbol in symbols:
+        print(f"Checking for breakouts in {symbol}")
+        table_name = f'ohlcv_data_{symbol}'.upper()
+        df = pd.read_sql(f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"', conn)
+        if df.empty:
+            continue
+        
+        df = calculate_all_indicators(df)
+        df['SAR_Reversals'] = calculate_pivot_reversals(df)
 
-            # Check for breakouts on the latest day
-            latest_index = len(df) - 1
-            if df['Breakout Type'].iloc[latest_index] in [1, 2]:
-                flat_features = extract_and_flatten_features(latest_index, df)
-                if flat_features is not None:
+        results = [isBreakOut(df, i) for i in range(len(df))]
+        df['Breakout_Type'] = [r[0] for r in results]
+        df['Slope'] = [r[1] for r in results]
+        df['Intercept'] = [r[2] for r in results]
+
+        breakouts_today = df[df['Date'] == end_date]
+        for index, row in breakouts_today.iterrows():
+            if row['Breakout_Type'] in [1, 2]:
+                features = extract_and_flatten_features(index, df)
+                if features is not None:
                     model_filename = f"{table_name}_model.pkl"
-                    if os.path.exists(model_filename):
-                        model = joblib.load(model_filename)
-                        imputer = SimpleImputer(strategy='mean')
-                        flat_features = imputer.fit_transform([flat_features])
-                        scaler = StandardScaler()
-                        flat_features_scaled = scaler.fit_transform(flat_features)
-                        prediction = model.predict(flat_features_scaled)[0]
-                        if prediction in ['VH', 'VB']:
-                            message = f"A True Bullish/Bearish breakout detected today for the action {symbol}: {prediction} on {df['Date'].iloc[latest_index]}"
-                            send_telegram_message(message)
-                        else:
-                            print(f"No valid breakout prediction for {symbol} on {df['Date'].iloc[latest_index]}")
-                    else:
-                        print(f"Model file {model_filename} does not exist.")
-                else:
-                    print(f"Failed to extract features for {symbol} on {df['Date'].iloc[latest_index]}")
-            else:
-                print(f"No breakout detected for {symbol} on {df['Date'].iloc[latest_index]}")
+                    model = joblib.load(model_filename)
+                    imputer = SimpleImputer(strategy='mean')
+                    scaler = StandardScaler()
+                    features = imputer.transform([features])
+                    features = scaler.transform(features)
+                    prediction = model.predict(features)[0]
+                    if prediction in ['VH', 'VB']:
+                        message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction} on {row['Date']}"
+                        send_telegram_message(message)
 
     conn.close()
 
