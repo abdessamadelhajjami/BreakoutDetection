@@ -305,7 +305,7 @@ def main():
             if prediction[0] in ['VH', 'VB']:
                 message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
                 send_telegram_message(message)
-    
+        print("finish")
     conn.close()
 
 if __name__ == "__main__":
