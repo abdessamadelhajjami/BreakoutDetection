@@ -10,6 +10,7 @@ import requests
 from scipy import stats
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
+import datetime
 
 # Telegram bot configuration
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
@@ -29,6 +30,22 @@ SNOWFLAKE_CONN = {
 def get_sp500_components():
     df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
     return df["Symbol"].tolist()
+
+# Check if the date is a market day
+def is_market_day(date):
+    # Check if the date is a weekday (0=Monday, 4=Friday)
+    if date.weekday() >= 5:
+        return False
+    # Check for US market holidays (add more holidays if necessary)
+    us_holidays = [
+        datetime.date(2024, 1, 1),  # New Year's Day
+        datetime.date(2024, 7, 4),  # Independence Day
+        datetime.date(2024, 12, 25),  # Christmas Day
+        # Add other holidays here
+    ]
+    if date in us_holidays:
+        return False
+    return True
 
 # Download SP500 data
 def download_sp500_data(symbol, start, end):
@@ -165,51 +182,24 @@ def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_perce
         else:
             return 'FH', price_variation_percentage
 
-def calculate_sma(df, periods):
-    for period in periods:
-        sma_key = f'SMA_{period}'
-        df[sma_key] = df['Close'].rolling(window=period).mean()
-    return df
-
-def calculate_macd(df, fast_period=12, slow_period=26, signal_period=9):
-    exp1 = df['Close'].ewm(span=fast_period, adjust=False).mean()
-    exp2 = df['Close'].ewm(span=slow_period, adjust=False).mean()
-    macd = exp1 - exp2
-    signal = macd.ewm(span=signal_period, adjust=False).mean()
-    df['MACD'] = macd
-    df['MACD_signal'] = signal
-    return df
-
-def calculate_rsi(df, period=14):
-    delta = df['Close'].diff(1)
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    df['RSI'] = 100 - (100 / (1 + rs))
-    return df
-
-def calculate_bbands(df, period=20, std_dev=2):
-    mid_band = df['Close'].rolling(window=period).mean()
-    sd = df['Close'].rolling(window=period).std()
-    df['Bollinger_High'] = mid_band + (std_dev * sd)
-    df['Bollinger_Low'] = mid_band - (std_dev * sd)
-    df['Bollinger_Mid'] = mid_band
-    return df
-
-def calculate_volume_ma(df, period=20):
-    df['Volume_MA'] = df['Volume'].rolling(window=period).mean()
-    return df
-
-def calculate_keltner_channel(df, ema_period=20, atr_period=20, multiplier=2):
-    df['Keltner_Mid'] = df['Close'].ewm(span=ema_period, adjust=False).mean()
-    high_low = df['High'] - df['Low']
-    high_close = (df['High'] - df['Close'].shift()).abs()
-    low_close = (df['Low'] - df['Close'].shift()).abs()
-    ranges = pd.concat([high_low, high_close, low_close], axis=1)
-    df['ATR'] = ranges.max(axis=1).rolling(window=atr_period).mean()
-    df['Keltner_High'] = df['Keltner_Mid'] + multiplier * df['ATR']
-    df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']
-    return df
+# Calculate pivot reversals
+def calculate_pivot_reversals(df, window=3):
+    pivot_series = pd.Series([0]*len(df), index=df.index)
+    for candle in range(window, len(df) - window):
+        pivotHigh, pivotLow = True, True
+        current_high, current_low = df.iloc[candle]['High'], df.iloc[candle]['Low']
+        for i in range(candle-window, candle+window+1):
+            if df.iloc[i]['Low'] < current_low:
+                pivotLow = False
+            if df.iloc[i]['High'] > current_high:
+                pivotHigh = False
+        if pivotHigh and pivotLow:
+            pivot_series[candle] = 3  
+        elif pivotHigh:
+            pivot_series[candle] = 2
+        elif pivotLow:
+            pivot_series[candle] = 1
+    return pivot_series
 
 # Calculate indicators
 def calculate_all_indicators(df):
@@ -279,7 +269,18 @@ def main():
         print(f"Processing {symbol}")
         table_name = f'ohlcv_data_{symbol}'.upper()
         last_date = get_last_date(engine, table_name)
-        data = download_sp500_data(symbol, last_date, end_date)
+        
+        # Ensure only market days are considered
+        last_date_dt = pd.to_datetime(last_date)
+        dates = pd.date_range(start=last_date_dt, end=end_date)
+        valid_dates = [d.strftime('%Y-%m-%d') for d in dates if is_market_day(d)]
+
+        if not valid_dates:
+            print(f"No valid market days found for {symbol}")
+            continue
+
+        start_date = valid_dates[0]
+        data = download_sp500_data(symbol, start_date, end_date)
         if not data.empty:
             success, nchunks, nrows = load_data_to_snowflake(conn, data, table_name)
             print(f"Data loaded: {success}, {nchunks} chunks, {nrows} rows")
