@@ -288,23 +288,24 @@ def main():
         # else:
         #     print(f"No new data for {symbol}")
 
-        # Vérifier les breakouts
+        # Vérifier les breakouts pour aujourd'hui
         df = read_data_from_snowflake(conn, table_name)
         if df.empty:
             continue
 
         df = calculate_all_indicators(df)
-        results = [isBreakOut(df, i) for i in range(len(df))]
-        df['Breakout Type'] = [r[0] for r in results]
-        df['Slope'] = [r[1] for r in results]
-        df['Intercept'] = [r[2] for r in results]
-
-        today_breakouts = df[df['Breakout Type'] > 0]
-        for _, breakout in today_breakouts.iterrows():
-            features = extract_and_flatten_features(df, breakout.name)
+        today_idx = df.index[-1]
+        breakout_type, slope, intercept = isBreakOut(df, today_idx)
+        if breakout_type > 0:
+            features = extract_and_flatten_features(df, today_idx)
             if features.size == 0:
                 continue
-            model = joblib.load(f"{table_name}_model.pkl")
+
+            model_filename = f"{table_name}_model.pkl"
+            local_model_path = f"{model_filename}"
+            session.file.get(f"@YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename}", local_model_path)
+            model = joblib.load(local_model_path)
+            
             scaler = StandardScaler()
             features_scaled = scaler.fit_transform(features.reshape(1, -1))
             prediction = model.predict(features_scaled)
@@ -312,6 +313,7 @@ def main():
                 message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
                 send_telegram_message(message)
         print("finish")
+    
     conn.close()
 
 if __name__ == "__main__":
