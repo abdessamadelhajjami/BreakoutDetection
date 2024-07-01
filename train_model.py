@@ -312,27 +312,27 @@ def main():
         warehouse=SNOWFLAKE_CONN['warehouse']
     ))
     
-    for symbol in symbols:
-        print(f"Processing {symbol}")
-        table_name = f'ohlcv_data_{symbol}'.upper()
-        last_date = get_last_date(engine, table_name)
+    # for symbol in symbols:
+    #     print(f"Processing {symbol}")
+    #     table_name = f'ohlcv_data_{symbol}'.upper()
+    #     last_date = get_last_date(engine, table_name)
         
-        # Ensure only market days are considered
-        last_date_dt = pd.to_datetime(last_date)
-        dates = pd.date_range(start=last_date_dt, end=end_date)
-        valid_dates = [d.strftime('%Y-%m-%d') for d in dates if is_market_day(d)]
+    #     # Ensure only market days are considered
+    #     last_date_dt = pd.to_datetime(last_date)
+    #     dates = pd.date_range(start=last_date_dt, end=end_date)
+    #     valid_dates = [d.strftime('%Y-%m-%d') for d in dates if is_market_day(d)]
 
-        if not valid_dates:
-            print(f"No valid market days found for {symbol}")
-            continue
+    #     if not valid_dates:
+    #         print(f"No valid market days found for {symbol}")
+    #         continue
 
-        start_date = valid_dates[0]
-        # data = download_sp500_data(symbol, start_date, end_date)
-        # if not data.empty:
-        #     success, nchunks, nrows = load_data_to_snowflake(conn, data, table_name)
-        #     print(f"Data loaded: {success}, {nchunks} chunks, {nrows} rows")
-        # else:
-        #     print(f"No new data for {symbol}")
+    #     start_date = valid_dates[0]
+    #     data = download_sp500_data(symbol, start_date, end_date)
+    #     if not data.empty:
+    #         success, nchunks, nrows = load_data_to_snowflake(conn, data, table_name)
+    #         print(f"Data loaded: {success}, {nchunks} chunks, {nrows} rows")
+    #     else:
+    #         print(f"No new data for {symbol}")
 
     # Check for breakouts
     for symbol in symbols:
@@ -341,7 +341,7 @@ def main():
             print(f"Table {table_name} does not exist")
             continue
 
-        df = pd.read_sql(f'SELECT * FROM {SNOWFLAKE_CONN["schema"]}.{table_name}', engine)
+        df = pd.read_sql(f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"', engine)
 
         # Calculate indicators and detect breakouts
         df = calculate_all_indicators(df)
