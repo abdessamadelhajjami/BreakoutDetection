@@ -49,7 +49,7 @@ def download_sp500_data(symbol, start, end):
 # Load data into Snowflake
 def load_data_to_snowflake(session, df, table_name):
     df.reset_index(inplace=True)
-
+    
     # Créer la table si elle n'existe pas
     session.sql(f"""
         CREATE TABLE IF NOT EXISTS {table_name} (
