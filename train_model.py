@@ -333,6 +333,14 @@ def main():
                         if prediction in ['VH', 'VB']:
                             message = f"A True Bullish/Bearish breakout detected today for the action {symbol}: {prediction} on {df['Date'].iloc[latest_index]}"
                             send_telegram_message(message)
+                        else:
+                            print(f"No valid breakout prediction for {symbol} on {df['Date'].iloc[latest_index]}")
+                    else:
+                        print(f"Model file {model_filename} does not exist.")
+                else:
+                    print(f"Failed to extract features for {symbol} on {df['Date'].iloc[latest_index]}")
+            else:
+                print(f"No breakout detected for {symbol} on {df['Date'].iloc[latest_index]}")
 
     conn.close()
 
