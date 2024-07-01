@@ -9,3 +9,4 @@ snowflake-connector-python
 snowflake-snowpark-python
 sqlalchemy
 snowflake-sqlalchemy
+os
