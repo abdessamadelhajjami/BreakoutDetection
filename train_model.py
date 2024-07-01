@@ -36,29 +36,25 @@ def download_sp500_data(symbol, start, end):
     return data
 
 # Check if table exists
-def table_exists(conn, table_name):
+def table_exists(engine, table_name):
     query = f"""
     SELECT COUNT(*)
     FROM information_schema.tables 
     WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'
     AND table_name = '{table_name.upper()}';
     """
-    cursor = conn.cursor()
-    cursor.execute(query)
-    result = cursor.fetchone()[0]
-    cursor.close()
-    return result > 0
+    result = engine.execute(query)
+    count = result.fetchone()[0]
+    return count > 0
 
 # Get the last date from the table
-def get_last_date(conn, table_name):
-    if not table_exists(conn, table_name):
+def get_last_date(engine, table_name):
+    if not table_exists(engine, table_name):
         return '2010-01-01'
     
     query = f'SELECT MAX("Date") FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
-    cursor = conn.cursor()
-    cursor.execute(query)
-    last_date = cursor.fetchone()[0]
-    cursor.close()
+    result = engine.execute(query)
+    last_date = result.fetchone()[0]
     
     if last_date is None:
         return '2010-01-01'
@@ -66,9 +62,8 @@ def get_last_date(conn, table_name):
         return (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
 
 # Create table if it does not exist
-def create_table_if_not_exists(conn, table_name):
-    cursor = conn.cursor()
-    cursor.execute(f"""
+def create_table_if_not_exists(engine, table_name):
+    query = f"""
         CREATE TABLE IF NOT EXISTS "{SNOWFLAKE_CONN['schema']}"."{table_name.upper()}" (
             "Date" DATE, 
             "Open" FLOAT, 
@@ -78,8 +73,8 @@ def create_table_if_not_exists(conn, table_name):
             "Adj_Close" FLOAT, 
             "Volume" FLOAT
         )
-    """)
-    cursor.close()
+    """
+    engine.execute(query)
 
 # Load data into Snowflake using `write_pandas`
 def load_data_to_snowflake(conn, df, table_name):
@@ -283,7 +278,7 @@ def main():
     for symbol in symbols:
         print(f"Processing {symbol}")
         table_name = f'ohlcv_data_{symbol}'.upper()
-        last_date = get_last_date(conn, table_name)
+        last_date = get_last_date(engine, table_name)
         data = download_sp500_data(symbol, last_date, end_date)
         if not data.empty:
             success, nchunks, nrows = load_data_to_snowflake(conn, data, table_name)
@@ -294,31 +289,36 @@ def main():
     # Check for breakouts
     for symbol in symbols:
         table_name = f'ohlcv_data_{symbol}'.upper()
-        if not table_exists(conn, table_name):
+        if not table_exists(engine, table_name):
             print(f"Table {table_name} does not exist")
             continue
 
-        df = pd.read_sql(f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"', engine)
+        df = pd.read_sql(f'SELECT * FROM {SNOWFLAKE_CONN["schema"]}.{table_name}', engine)
 
         # Calculate indicators and detect breakouts
         df = calculate_all_indicators(df)
-        df['SAR Reversals'] = calculate_pivot_reversals(df)
+        df['SAR Re'] = calculate_pivot_reversals(df)
+
+        # Add breakouts to the dataframe
         results = [isBreakOut(df, i) for i in range(len(df))]
         df['Breakout Type'] = [r[0] for r in results]
         df['Slope'] = [r[1] for r in results]
         df['Intercept'] = [r[2] for r in results]
-        
-        # Check for today's breakout
-        today_index = df.index[-1]
-        if df.at[today_index, 'Breakout Type'] in [1, 2]:
-            features = extract_and_flatten_features(today_index, df)
-            if features is not None:
-                model = joblib.load(f"{table_name}_model.pkl")
-                prediction = model.predict(features.reshape(1, -1))
-                if prediction[0] in ['VH', 'VB']:
-                    message = f"A True {prediction[0]} breakout detected today for the action {symbol}."
-                    send_telegram_message(message)
 
+        # Check for today's breakout
+        today_breakout = df.iloc[-1]
+        if today_breakout['Breakout Type'] != 0:
+            flat_features = extract_and_flatten_features(len(df) - 1, df)
+            if flat_features is not None:
+                model_filename = f"{table_name}_model.pkl"
+                model = joblib.load(model_filename)
+                scaler = StandardScaler()
+                flat_features_scaled = scaler.fit_transform([flat_features])
+                prediction = model.predict(flat_features_scaled)[0]
+                if prediction in ['VH', 'VB']:
+                    message = f"A {prediction} breakout detected today for {symbol}"
+                    send_telegram_message(message)
+    
     conn.close()
 
 if __name__ == "__main__":
