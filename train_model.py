@@ -31,7 +31,7 @@ SNOWFLAKE_CONN = {
     'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
     'user': 'AELHAJJAMI',
     'password': 'Abdou3012',
-    'warehouse': 'COMPUTE_WH',
+    'warehouse': 'CRYPTO_WH',
     'database': 'BREAKOUDETECTIONDB',
     'schema': 'SP500',
 }
@@ -269,7 +269,9 @@ def main():
         df['Slope'] = [r[1] for r in results]
         df['Intercept'] = [r[2] for r in results]
 
-        for index in range(len(df)):
+        today = pd.Timestamp.today().strftime('%Y-%m-%d')
+        today_df = df[df['Date'] == today]
+        for index in today_df.index:
             if df.loc[index, 'Breakout Type'] in [1, 2]:
                 features = extract_and_flatten_features(index, df)
                 if features is not None:
