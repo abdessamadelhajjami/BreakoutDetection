@@ -33,26 +33,38 @@ def download_sp500_data(symbol, start, end):
     data = yf.download(symbol, start=start, end=end)
     return data
 
-def table_exists(engine, schema, table_name):
-    inspector = inspect(engine)
-    return inspector.has_table(table_name, schema=schema)
+def table_exists(conn, table_name):
+    query = f"""
+    SELECT COUNT(*)
+    FROM information_schema.tables 
+    WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'
+    AND table_name = '{table_name.upper()}';
+    """
+    cursor = conn.cursor()
+    cursor.execute(query)
+    result = cursor.fetchone()[0]
+    cursor.close()
+    return result > 0
 
-def get_last_date(engine, schema, table_name):
-    if not table_exists(engine, schema, table_name):
+def get_last_date(conn, table_name):
+    if not table_exists(conn, table_name):
         return '2010-01-01'
     
-    query = f'SELECT MAX("Date") FROM "{schema}"."{table_name}"'
-    result = engine.execute(query).fetchone()
-    last_date = result[0]
+    query = f'SELECT MAX("Date") FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
+    cursor = conn.cursor()
+    cursor.execute(query)
+    last_date = cursor.fetchone()[0]
+    cursor.close()
     
     if last_date is None:
         return '2010-01-01'
     else:
         return (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
 
-def create_table_if_not_exists(engine, schema, table_name):
-    query = f"""
-        CREATE TABLE IF NOT EXISTS "{schema}"."{table_name}" (
+def create_table_if_not_exists(conn, table_name):
+    cursor = conn.cursor()
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS "{SNOWFLAKE_CONN['schema']}"."{table_name.upper()}" (
             "Date" DATE, 
             "Open" FLOAT, 
             "High" FLOAT, 
@@ -61,21 +73,18 @@ def create_table_if_not_exists(engine, schema, table_name):
             "Adj_Close" FLOAT, 
             "Volume" FLOAT
         )
-    """
-    engine.execute(query)
+    """)
+    cursor.close()
 
-def load_data_to_snowflake(engine, df, schema, table_name):
-    create_table_if_not_exists(engine, schema, table_name)
+def load_data_to_snowflake(conn, df, table_name):
+    create_table_if_not_exists(conn, table_name)
     
     df.reset_index(inplace=True)
     df.columns = [col.replace(' ', '_') for col in df.columns]
     df['Date'] = df['Date'].astype(str)
     
-    conn = engine.raw_connection()
-    success, nchunks, nrows, _ = write_pandas(conn, df, f"{schema}.{table_name}")
-    conn.close()
+    success, nchunks, nrows, _ = write_pandas(conn, df, f"{SNOWFLAKE_CONN['schema']}.{table_name.upper()}")
     return success, nchunks, nrows
-
 # Detect breakout using isBreakOut
 def isBreakOut(df, candle, window=1):
     for backcandles in [14, 20, 40, 60]:  
@@ -260,14 +269,14 @@ from snowflake.sqlalchemy import URL
 import pandas as pd
 
 def main():
-    engine = create_engine(URL(
-        account=SNOWFLAKE_CONN['account'],
+    conn = snowflake.connector.connect(
         user=SNOWFLAKE_CONN['user'],
         password=SNOWFLAKE_CONN['password'],
+        account=SNOWFLAKE_CONN['account'],
+        warehouse=SNOWFLAKE_CONN['warehouse'],
         database=SNOWFLAKE_CONN['database'],
-        schema=SNOWFLAKE_CONN['schema'],
-        warehouse=SNOWFLAKE_CONN['warehouse']
-    ))
+        schema=SNOWFLAKE_CONN['schema']
+    )
     
     symbols = get_sp500_components()
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
@@ -275,17 +284,17 @@ def main():
     for symbol in symbols:
         print(f"Processing {symbol}")
         table_name = f'ohlcv_data_{symbol}'.upper()
-        last_date = get_last_date(engine, SNOWFLAKE_CONN['schema'], table_name)
+        last_date = get_last_date(conn, table_name)
         data = download_sp500_data(symbol, last_date, end_date)
         if not data.empty:
-            success, nchunks, nrows = load_data_to_snowflake(engine, data, SNOWFLAKE_CONN['schema'], table_name)
+            success, nchunks, nrows = load_data_to_snowflake(conn, data, table_name)
             print(f"Data loaded: {success}, {nchunks} chunks, {nrows} rows")
         else:
             print(f"No new data for {symbol}")
 
         # Vérifier les breakouts
         query = f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
-        df = pd.read_sql(query, engine)
+        df = pd.read_sql(query, conn)
         if df.empty:
             continue
 
@@ -308,7 +317,7 @@ def main():
                 message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
                 send_telegram_message(message)
     
-    engine.dispose()
+    conn.close()
 
 if __name__ == "__main__":
     main()
