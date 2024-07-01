@@ -7,6 +7,7 @@ from snowflake.connector.pandas_tools import write_pandas
 import joblib
 from sklearn.preprocessing import StandardScaler
 import requests
+import os 
 
 
 # Telegram bot configuration
