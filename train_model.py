@@ -296,6 +296,7 @@ def main():
         df = calculate_all_indicators(df)
         today_idx = df.index[-1]
         breakout_type, slope, intercept = isBreakOut(df, today_idx)
+        breakou_type = 1
         print("breakout type today is :", breakout_type)
         breakou_type = 1
         if breakout_type > 0:
