@@ -269,7 +269,7 @@ def main():
     )
     
     # SQLAlchemy engine for reading data
-    engine = create_engine(f'snowflake://{SNOWFLAKE_CONN["user"]}:{SNOWFLAKE_CONN["password"]}@{SNOWFLAKE_CONN["account"]}/{SNOWFLAKE_CONN["database"]}/{SNOWFLAKE_CONN["schema"]}?warehouse={SNOWFLAKE_CONN["warehouse"]}')
+    engine = create_engine(f'snowflake+snowflakeconnector://{SNOWFLAKE_CONN["user"]}:{SNOWFLAKE_CONN["password"]}@{SNOWFLAKE_CONN["account"]}/{SNOWFLAKE_CONN["database"]}/{SNOWFLAKE_CONN["schema"]}?warehouse={SNOWFLAKE_CONN["warehouse"]}')
     
     symbols = get_sp500_components()
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
