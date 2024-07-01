@@ -47,25 +47,24 @@ def download_sp500_data(symbol, start, end):
     return data
 
 # Load data into Snowflake
-def load_data_to_snowflake(conn, df, table_name):
+def load_data_to_snowflake(session, df, table_name):
     df.reset_index(inplace=True)
-    cursor = conn.cursor()
 
     # Créer la table si elle n'existe pas
-    cursor.execute(f"""
+    session.sql(f"""
         CREATE TABLE IF NOT EXISTS {table_name} (
-            Date DATE, 
-            Open FLOAT, 
-            High FLOAT, 
-            Low FLOAT, 
-            Close FLOAT, 
-            Adj_Close FLOAT, 
-            Volume FLOAT
+            "Date" DATE, 
+            "Open" FLOAT, 
+            "High" FLOAT, 
+            "Low" FLOAT, 
+            "Close" FLOAT, 
+            "Adj_Close" FLOAT, 
+            "Volume" FLOAT
         )
-    """)
+    """).collect()
 
     # Insérer les données dans la table
-    success, nchunks, nrows, _ = snowflake.connector.pandas_tools.write_pandas(conn, df, table_name)
+    session.write_pandas(df, table_name)
 
 # Calculate pivot reversals
 def calculate_pivot_reversals(df, window=3):
@@ -138,6 +137,84 @@ def isBreakOut(df, candle, window=1):
             return 1, sl_lows, interc_lows
     return 0, None, None
 
+def calculate_sma(df, periods):
+    for period in periods:
+        sma_key = f'SMA_{period}'
+        df[sma_key] = df['Close'].rolling(window=period).mean()
+    return df
+
+def calculate_macd(df, fast_period=12, slow_period=26, signal_period=9):
+    exp1 = df['Close'].ewm(span=fast_period, adjust=False).mean()
+    exp2 = df['Close'].ewm(span=slow_period, adjust=False).mean()
+    macd = exp1 - exp2
+    signal = macd.ewm(span=signal_period, adjust=False).mean()
+    df['MACD'] = macd
+    df['MACD_signal'] = signal
+    return df
+
+def calculate_rsi(df, period=14):
+    delta = df['Close'].diff(1)
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+    return df
+
+def calculate_bbands(df, period=20, std_dev=2):
+    mid_band = df['Close'].rolling(window=period).mean()
+    sd = df['Close'].rolling(window=period).std()
+    df['Bollinger_High'] = mid_band + (std_dev * sd)
+    df['Bollinger_Low'] = mid_band - (std_dev * sd)
+    df['Bollinger_Mid'] = mid_band
+    return df
+
+def calculate_volume_ma(df, period=20):
+    df['Volume_MA'] = df['Volume'].rolling(window=period).mean()
+    return df
+
+def calculate_keltner_channel(df, ema_period=20, atr_period=20, multiplier=2):
+    df['Keltner_Mid'] = df['Close'].ewm(span=ema_period, adjust=False).mean()
+    high_low = df['High'] - df['Low']
+    high_close = (df['High'] - df['Close'].shift()).abs()
+    low_close = (df['Low'] - df['Close'].shift()).abs()
+    ranges = pd.concat([high_low, high_close, low_close], axis=1)
+    df['ATR'] = ranges.max(axis=1).rolling(window=atr_period).mean()
+    df['Keltner_High'] = df['Keltner_Mid'] + multiplier * df['ATR']
+    df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']
+    return df
+
+# Calculate indicators
+def calculate_all_indicators(df):
+    df = calculate_sma(df, [7, 20, 50, 200])
+    df = calculate_macd(df)
+    df = calculate_rsi(df)
+    df = calculate_bbands(df)
+    df = calculate_volume_ma(df)
+    df = calculate_keltner_channel(df)
+    return df
+
+# Extract and flatten features
+def extract_and_flatten_features(candle, df):
+    if candle < 14:
+        return None
+    data_window = df.iloc[candle-14:candle]
+    normalized_data = pd.DataFrame()
+    for period in [7, 20, 50, 200]:
+        sma_key = f'SMA_{period}'
+        normalized_data[f'Norm_{sma_key}'] = data_window[sma_key] / data_window['Close']
+    normalized_data['Norm_MACD'] = (data_window['MACD'] - data_window['MACD'].mean()) / data_window['MACD'].std()
+    normalized_data['Norm_RSI'] = (data_window['RSI'] - data_window['RSI'].mean()) / data_window['RSI'].std()
+    normalized_data['Norm_Bollinger_Width'] = (data_window['Bollinger_High'] - data_window['Bollinger_Low']) / data_window['Bollinger_Mid']
+    normalized_data['Norm_Volume'] = data_window['Volume'] / data_window['Volume_MA']
+    normalized_data['Norm_Keltner_High'] = (data_window['Keltner_High'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
+    normalized_data['Norm_Keltner_Low'] = (data_window['Keltner_Low'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
+    normalized_data['Slope'] = df['Slope'].iloc[candle]
+    normalized_data['Intercept'] = df['Intercept'].iloc[candle]
+    normalized_data['Breakout_Type'] = df['Breakout Type'].iloc[candle]
+    flattened_features = normalized_data.values.flatten().tolist()
+    flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
+    return np.array(flattened_features)
+
 # Fonction principale
 def main():
     connection_parameters = {
@@ -150,7 +227,6 @@ def main():
     }
     session = snowpark.Session.builder.configs(connection_parameters).create()
     symbols = get_sp500_components()
-    start_date = '2010-01-01'
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
 
     for symbol in symbols:
@@ -171,6 +247,8 @@ def main():
             """).collect()
             max_date = max_date_result[0][0]
             start_date = (pd.Timestamp(max_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+        else:
+            start_date = '2010-01-01'
 
         # Download data
         data = download_sp500_data(symbol, start_date, end_date)
@@ -191,25 +269,20 @@ def main():
         df['Slope'] = [r[1] for r in results]
         df['Intercept'] = [r[2] for r in results]
 
-        # Charger le modèle
-        model_filename = f"{table['TABLE_NAME']}_model.pkl"
-        session.file.get(f"@YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename}", model_filename)
-        model = joblib.load(model_filename)
-
-        # Préparer les données pour la prédiction
-        for i in range(14, len(df)):
-            if df.loc[i, 'Breakout Type'] in [1, 2]:
-                flat_features = extract_and_flatten_features(i, df)
-                if flat_features is not None:
-                    features = np.array(flat_features).reshape(1, -1)
-                    imputer = SimpleImputer(strategy='mean')
-                    features = imputer.fit_transform(features)
-                    scaler = StandardScaler()
-                    features_scaled = scaler.fit_transform(features)
-                    prediction = model.predict(features_scaled)
+        for index in range(len(df)):
+            if df.loc[index, 'Breakout Type'] in [1, 2]:
+                features = extract_and_flatten_features(index, df)
+                if features is not None:
+                    model_filename = f"{table['TABLE_NAME']}_model.pkl"
+                    model_path = f"@YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename}"
+                    session.file.get(model_path, model_filename)
+                    model = joblib.load(model_filename)
+                    prediction = model.predict([features])[0]
+                    os.remove(model_filename)
                     if prediction in ['VH', 'VB']:
-                        message = f"A True {'Bullish' if prediction == 'VH' else 'Bearish'} breakout detected for the action {table['TABLE_NAME']} on {df.loc[i, 'Date']}"
+                        message = f"A True {'Bullish' if prediction == 'VH' else 'Bearish'} breakout detected for {table['TABLE_NAME']} on {df.loc[index, 'Date']}"
                         send_telegram_message(message)
+                        print(message)
     session.close()
 
 if __name__ == "__main__":
