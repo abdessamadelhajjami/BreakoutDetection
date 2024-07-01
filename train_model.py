@@ -1,5 +1,3 @@
-
-
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -9,6 +7,7 @@ from snowflake.connector.pandas_tools import write_pandas
 import joblib
 from sklearn.preprocessing import StandardScaler
 import requests
+
 
 # Telegram bot configuration
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
@@ -136,24 +135,6 @@ def line_crosses_candles(data, slope, intercept, start_index, end_index):
             body_crosses += 1
     return body_crosses > 1
 
-# Confirm breakout
-def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
-    if breakout_index + confirmation_candles >= len(df):
-        return None, None
-    breakout_type = df.loc[breakout_index, 'Breakout Type']
-    breakout_price = df.loc[breakout_index, 'Intercept']
-    last_confirmed_price = df.iloc[breakout_index + confirmation_candles]['Close']
-    price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
-    if breakout_type == 1:
-        if price_variation_percentage <= -threshold_percentage:
-            return 'VB', price_variation_percentage
-        else:
-            return 'FB', price_variation_percentage
-    elif breakout_type == 2:
-        if price_variation_percentage >= threshold_percentage:
-            return 'VH', price_variation_percentage
-        else:
-            return 'FH', price_variation_percentage
 
 # Calculate pivot reversals
 def calculate_pivot_reversals(df, window=3):
@@ -267,6 +248,16 @@ from sqlalchemy import create_engine
 from snowflake.sqlalchemy import URL
 import pandas as pd
 
+def read_data_from_snowflake(conn, table_name):
+    query = f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
+    cursor = conn.cursor()
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    columns = [desc[0] for desc in cursor.description]
+    df = pd.DataFrame(rows, columns=columns)
+    cursor.close()
+    return df
+
 def main():
     conn = snowflake.connector.connect(
         user=SNOWFLAKE_CONN['user'],
@@ -292,8 +283,7 @@ def main():
         #     print(f"No new data for {symbol}")
 
         # Vérifier les breakouts
-        query = f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
-        df = pd.read_sql(query, conn)
+        df = read_data_from_snowflake(conn, table_name)
         if df.empty:
             continue
 
