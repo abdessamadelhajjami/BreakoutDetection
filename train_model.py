@@ -290,6 +290,7 @@ def send_telegram_message(message):
     if response.status_code != 200:
         print(f"Failed to send message: {response.text}")
 
+# Main function
 def main():
     engine = create_engine(URL(
         account=SNOWFLAKE_CONN['account'],
@@ -328,11 +329,11 @@ def main():
     # Check for breakouts
     for symbol in symbols:
         table_name = f'ohlcv_data_{symbol}'.upper()
-        if not table_exists(engine, SNOWFLAKE_CONN['schema'], table_name):
+        if not table_exists(engine, table_name):
             print(f"Table {table_name} does not exist")
             continue
 
-        df = pd.read_sql(f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"', engine)
+        df = pd.read_sql(f'SELECT * FROM {SNOWFLAKE_CONN["schema"]}.{table_name}', engine)
 
         # Calculate indicators and detect breakouts
         df = calculate_all_indicators(df)
