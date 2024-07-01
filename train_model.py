@@ -290,6 +290,10 @@ def send_telegram_message(message):
     if response.status_code != 200:
         print(f"Failed to send message: {response.text}")
 
+from sqlalchemy import create_engine
+from snowflake.sqlalchemy import URL
+import pandas as pd
+
 # Main function
 def main():
     engine = create_engine(URL(
@@ -307,7 +311,7 @@ def main():
     # for symbol in symbols:
     #     print(f"Processing {symbol}")
     #     table_name = f'ohlcv_data_{symbol}'.upper()
-    #     last_date = get_last_date(engine, SNOWFLAKE_CONN['schema'], table_name)
+    #     last_date = get_last_date(engine, table_name)
         
     #     # Ensure only market days are considered
     #     last_date_dt = pd.to_datetime(last_date)
@@ -321,7 +325,7 @@ def main():
     #     start_date = valid_dates[0]
     #     data = download_sp500_data(symbol, start_date, end_date)
     #     if not data.empty:
-    #         success, nchunks, nrows = load_data_to_snowflake(engine, data, SNOWFLAKE_CONN['schema'], table_name)
+    #         success, nchunks, nrows = load_data_to_snowflake(engine, data, table_name)
     #         print(f"Data loaded: {success}, {nchunks} chunks, {nrows} rows")
     #     else:
     #         print(f"No new data for {symbol}")
@@ -333,7 +337,8 @@ def main():
             print(f"Table {table_name} does not exist")
             continue
 
-        df = pd.read_sql(f'SELECT * FROM {SNOWFLAKE_CONN["schema"]}.{table_name}', engine)
+        query = f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
+        df = pd.read_sql(query, engine)
 
         # Calculate indicators and detect breakouts
         df = calculate_all_indicators(df)
