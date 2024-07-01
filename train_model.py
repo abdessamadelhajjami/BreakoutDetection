@@ -1,12 +1,11 @@
 
 
-
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from scipy import stats
-from sqlalchemy import create_engine, inspect
-from snowflake.sqlalchemy import URL
+import snowflake.connector
+from snowflake.connector.pandas_tools import write_pandas
 import joblib
 from sklearn.preprocessing import StandardScaler
 import requests
