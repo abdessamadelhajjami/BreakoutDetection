@@ -12,18 +12,6 @@ def get_updates():
     else:
         print(f"Échec de l'obtention des mises à jour: {response.text}")
 
-# Fonction pour envoyer un message Telegram
-def send_telegram_message(chat_id, message):
-    payload = {
-        'chat_id': chat_id,
-        'text': message
-    }
-    response = requests.post(f"{TELEGRAM_API_URL}/sendMessage", data=payload)
-    if response.status_code == 200:
-        print("Message envoyé avec succès")
-    else:
-        print(f"Échec de l'envoi du message: {response.text}")
-
 # Tester l'obtention de mises à jour
 if __name__ == "__main__":
     get_updates()
