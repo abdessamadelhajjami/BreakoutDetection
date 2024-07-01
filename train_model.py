@@ -4,6 +4,7 @@ import numpy as np
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
 from sqlalchemy import create_engine
+from snowflake.sqlalchemy import URL
 import joblib
 import requests
 from scipy import stats
@@ -132,7 +133,7 @@ def collect_channel(df, candle, backcandles, window=1):
     highs, idxhighs = localdf[localdf['SAR Reversals'] == 1].High.values, localdf[localdf['SAR Reversals'] == 1].High.index
     lows, idxlows = localdf[localdf['SAR Reversals'] == 2].Low.values, localdf[localdf['SAR Reversals'] == 2].Low.index
     if len(lows) >= 2 and len(highs) >= 2:
-        sl_lows, interc_lows, _, _, _ = stats.linregress(idxlows, lows)
+        sl_lows, interc_lows, _, _, _ = stats.linregress(idx lows, lows)
         sl_highs, interc_highs, _, _, _ = stats.linregress(idxhighs, highs)
         return sl_lows, interc_lows, sl_highs, interc_highs, 0, 0
     else:
@@ -247,25 +248,15 @@ def extract_and_flatten_features(candle, df):
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
 
-# Detect and label breakouts
-def detect_and_label_breakouts(df):
-    Breakout_indices = []
-    Breakout_confirmed = []
-    Breakout_percentage = []
-
-    for index in df.index:
-        if df.loc[index, 'Breakout Type'] in [1, 2]:
-            result = confirm_breakout(df, index)
-            if result:
-                confirmation_label, variation = result
-                df.at[index, 'Breakout_Confirmed'] = confirmation_label
-                df.at[index, 'Price_Variation_Percentage'] = variation
-                Breakout_indices.append(index)
-                Breakout_confirmed.append(confirmation_label)
-                Breakout_percentage.append(variation)
-    if 'Breakout_Confirmed' not in df.columns:
-        df['Breakout_Confirmed'] = pd.NA
-    return df
+# Send Telegram notification
+def send_telegram_message(message):
+    payload = {
+        'chat_id': TELEGRAM_CHAT_ID,
+        'text': message
+    }
+    response = requests.post(TELEGRAM_API_URL, data=payload)
+    if response.status_code != 200:
+        print(f"Failed to send message: {response.text}")
 
 # Main function
 def main():
@@ -280,7 +271,14 @@ def main():
     
     symbols = get_sp500_components()
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
-    engine = create_engine(f'snowflake+snowflakeconnector://{SNOWFLAKE_CONN["user"]}:{SNOWFLAKE_CONN["password"]}@{SNOWFLAKE_CONN["account"]}/{SNOWFLAKE_CONN["database"]}/{SNOWFLAKE_CONN["schema"]}?warehouse={SNOWFLAKE_CONN["warehouse"]}')
+    engine = create_engine(URL(
+        account=SNOWFLAKE_CONN['account'],
+        user=SNOWFLAKE_CONN['user'],
+        password=SNOWFLAKE_CONN['password'],
+        database=SNOWFLAKE_CONN['database'],
+        schema=SNOWFLAKE_CONN['schema'],
+        warehouse=SNOWFLAKE_CONN['warehouse']
+    ))
     
     for symbol in symbols:
         print(f"Processing {symbol}")
