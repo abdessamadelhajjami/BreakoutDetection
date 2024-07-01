@@ -325,8 +325,7 @@ def main():
             if features.size == 0:
                 continue
 
-            model_filename = f"{table_name}_model.pkl"
-            local_model_path = f"{model_filename}"
+            
            # Initialize Snowflake session for file transfer
             session = snowflake.connector.connect(
                 user=SNOWFLAKE_CONN['user'],
@@ -336,9 +335,12 @@ def main():
                 database=SNOWFLAKE_CONN['database'],
                 schema=SNOWFLAKE_CONN['schema']
             )
+            # Récupérer et charger le modèle depuis Snowflake stage
+            model_filename = f"{table_name}_model.pkl"
+            local_model_path = os.path.join(os.getcwd(), model_filename)
             session.cursor().execute(f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}")
-            
             model = joblib.load(local_model_path)
+
             scaler = StandardScaler()
             features_scaled = scaler.fit_transform(features.reshape(1, -1))
             print ("prediction vrai", prediction)
