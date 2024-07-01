@@ -290,19 +290,7 @@ def send_telegram_message(message):
     if response.status_code != 200:
         print(f"Failed to send message: {response.text}")
 
-# Main function
 def main():
-    conn = snowflake.connector.connect(
-        user=SNOWFLAKE_CONN['user'],
-        password=SNOWFLAKE_CONN['password'],
-        account=SNOWFLAKE_CONN['account'],
-        warehouse=SNOWFLAKE_CONN['warehouse'],
-        database=SNOWFLAKE_CONN['database'],
-        schema=SNOWFLAKE_CONN['schema']
-    )
-    
-    symbols = get_sp500_components()
-    end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
     engine = create_engine(URL(
         account=SNOWFLAKE_CONN['account'],
         user=SNOWFLAKE_CONN['user'],
@@ -312,10 +300,13 @@ def main():
         warehouse=SNOWFLAKE_CONN['warehouse']
     ))
     
+    symbols = get_sp500_components()
+    end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
+    
     # for symbol in symbols:
     #     print(f"Processing {symbol}")
     #     table_name = f'ohlcv_data_{symbol}'.upper()
-    #     last_date = get_last_date(engine, table_name)
+    #     last_date = get_last_date(engine, SNOWFLAKE_CONN['schema'], table_name)
         
     #     # Ensure only market days are considered
     #     last_date_dt = pd.to_datetime(last_date)
@@ -329,7 +320,7 @@ def main():
     #     start_date = valid_dates[0]
     #     data = download_sp500_data(symbol, start_date, end_date)
     #     if not data.empty:
-    #         success, nchunks, nrows = load_data_to_snowflake(conn, data, table_name)
+    #         success, nchunks, nrows = load_data_to_snowflake(engine, data, SNOWFLAKE_CONN['schema'], table_name)
     #         print(f"Data loaded: {success}, {nchunks} chunks, {nrows} rows")
     #     else:
     #         print(f"No new data for {symbol}")
@@ -337,7 +328,7 @@ def main():
     # Check for breakouts
     for symbol in symbols:
         table_name = f'ohlcv_data_{symbol}'.upper()
-        if not table_exists(engine, table_name):
+        if not table_exists(engine, SNOWFLAKE_CONN['schema'], table_name):
             print(f"Table {table_name} does not exist")
             continue
 
@@ -367,7 +358,7 @@ def main():
                     message = f"A {prediction} breakout detected today for {symbol}"
                     send_telegram_message(message)
     
-    conn.close()
+    engine.dispose()
 
 if __name__ == "__main__":
     main()
