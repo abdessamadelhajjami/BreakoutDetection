@@ -19,7 +19,7 @@ SNOWFLAKE_CONN = {
     'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
     'user': 'AELHAJJAMI',
     'password': 'Abdou3012',
-    'warehouse': 'CRYPTO_WH',
+    'warehouse': 'COMPUTE_WH',
     'database': 'BREAKOUDETECTIONDB',
     'schema': 'SP500',
 }
