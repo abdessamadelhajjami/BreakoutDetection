@@ -1,16 +1,15 @@
+
+
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import snowflake.connector
-from snowflake.connector.pandas_tools import write_pandas
-from sqlalchemy import create_engine
+from scipy import stats
+from sqlalchemy import create_engine, inspect
 from snowflake.sqlalchemy import URL
 import joblib
-import requests
-from scipy import stats
-from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
-import datetime
+import requests
 
 # Telegram bot configuration
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
@@ -26,62 +25,34 @@ SNOWFLAKE_CONN = {
     'schema': 'SP500',
 }
 
-# Functions to get SP500 components
 def get_sp500_components():
     df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
     return df["Symbol"].tolist()
 
-# Check if the date is a market day
-def is_market_day(date):
-    # Check if the date is a weekday (0=Monday, 4=Friday)
-    if date.weekday() >= 5:
-        return False
-    # Check for US market holidays (add more holidays if necessary)
-    us_holidays = [
-        datetime.date(2024, 1, 1),  # New Year's Day
-        datetime.date(2024, 7, 4),  # Independence Day
-        datetime.date(2024, 12, 25),  # Christmas Day
-        # Add other holidays here
-    ]
-    if date in us_holidays:
-        return False
-    return True
-
-# Download SP500 data
 def download_sp500_data(symbol, start, end):
     data = yf.download(symbol, start=start, end=end)
     return data
 
-# Check if table exists
-def table_exists(engine, table_name):
-    query = f"""
-    SELECT COUNT(*)
-    FROM information_schema.tables 
-    WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'
-    AND table_name = '{table_name.upper()}';
-    """
-    result = engine.execute(query)
-    count = result.fetchone()[0]
-    return count > 0
+def table_exists(engine, schema, table_name):
+    inspector = inspect(engine)
+    return inspector.has_table(table_name, schema=schema)
 
-# Get the last date from the table
-def get_last_date(engine, table_name):
-    if not table_exists(engine, table_name):
+def get_last_date(engine, schema, table_name):
+    if not table_exists(engine, schema, table_name):
         return '2010-01-01'
     
-    query = f'SELECT MAX("Date") FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
-    result = engine.execute(query)
-    last_date = result.fetchone()[0]
+    query = f'SELECT MAX("Date") FROM "{schema}"."{table_name}"'
+    result = engine.execute(query).fetchone()
+    last_date = result[0]
     
     if last_date is None:
         return '2010-01-01'
     else:
         return (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
 
-# Create table if it does not exist
-def create_table_if_not_exists(engine, table_name):
+def create_table_if_not_exists(engine, schema, table_name):
     query = f"""
-        CREATE TABLE IF NOT EXISTS "{SNOWFLAKE_CONN['schema']}"."{table_name.upper()}" (
+        CREATE TABLE IF NOT EXISTS "{schema}"."{table_name}" (
             "Date" DATE, 
             "Open" FLOAT, 
             "High" FLOAT, 
@@ -93,22 +64,16 @@ def create_table_if_not_exists(engine, table_name):
     """
     engine.execute(query)
 
-# Load data into Snowflake using `write_pandas`
-def load_data_to_snowflake(conn, df, table_name):
-    # Create the table if it doesn't exist
-    create_table_if_not_exists(conn, table_name)
+def load_data_to_snowflake(engine, df, schema, table_name):
+    create_table_if_not_exists(engine, schema, table_name)
     
-    # Reset the index
     df.reset_index(inplace=True)
-    
-    # Rename columns to avoid invalid identifiers
     df.columns = [col.replace(' ', '_') for col in df.columns]
-    
-    # Ensure 'Date' column is of type string
     df['Date'] = df['Date'].astype(str)
     
-    # Insert data using `write_pandas`
-    success, nchunks, nrows, _ = write_pandas(conn, df, table_name.upper())
+    conn = engine.raw_connection()
+    success, nchunks, nrows, _ = write_pandas(conn, df, f"{schema}.{table_name}")
+    conn.close()
     return success, nchunks, nrows
 
 # Detect breakout using isBreakOut
@@ -294,7 +259,6 @@ from sqlalchemy import create_engine
 from snowflake.sqlalchemy import URL
 import pandas as pd
 
-# Main function
 def main():
     engine = create_engine(URL(
         account=SNOWFLAKE_CONN['account'],
@@ -307,62 +271,42 @@ def main():
     
     symbols = get_sp500_components()
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
-    
-    # for symbol in symbols:
-    #     print(f"Processing {symbol}")
-    #     table_name = f'ohlcv_data_{symbol}'.upper()
-    #     last_date = get_last_date(engine, table_name)
-        
-    #     # Ensure only market days are considered
-    #     last_date_dt = pd.to_datetime(last_date)
-    #     dates = pd.date_range(start=last_date_dt, end=end_date)
-    #     valid_dates = [d.strftime('%Y-%m-%d') for d in dates if is_market_day(d)]
 
-    #     if not valid_dates:
-    #         print(f"No valid market days found for {symbol}")
-    #         continue
-
-    #     start_date = valid_dates[0]
-    #     data = download_sp500_data(symbol, start_date, end_date)
-    #     if not data.empty:
-    #         success, nchunks, nrows = load_data_to_snowflake(engine, data, table_name)
-    #         print(f"Data loaded: {success}, {nchunks} chunks, {nrows} rows")
-    #     else:
-    #         print(f"No new data for {symbol}")
-
-    # Check for breakouts
     for symbol in symbols:
+        print(f"Processing {symbol}")
         table_name = f'ohlcv_data_{symbol}'.upper()
-        if not table_exists(engine, table_name):
-            print(f"Table {table_name} does not exist")
-            continue
+        last_date = get_last_date(engine, SNOWFLAKE_CONN['schema'], table_name)
+        data = download_sp500_data(symbol, last_date, end_date)
+        if not data.empty:
+            success, nchunks, nrows = load_data_to_snowflake(engine, data, SNOWFLAKE_CONN['schema'], table_name)
+            print(f"Data loaded: {success}, {nchunks} chunks, {nrows} rows")
+        else:
+            print(f"No new data for {symbol}")
 
+        # Vérifier les breakouts
         query = f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
         df = pd.read_sql(query, engine)
+        if df.empty:
+            continue
 
-        # Calculate indicators and detect breakouts
         df = calculate_all_indicators(df)
-        df['SAR Re'] = calculate_pivot_reversals(df)
-
-        # Add breakouts to the dataframe
         results = [isBreakOut(df, i) for i in range(len(df))]
         df['Breakout Type'] = [r[0] for r in results]
         df['Slope'] = [r[1] for r in results]
         df['Intercept'] = [r[2] for r in results]
 
-        # Check for today's breakout
-        today_breakout = df.iloc[-1]
-        if today_breakout['Breakout Type'] != 0:
-            flat_features = extract_and_flatten_features(len(df) - 1, df)
-            if flat_features is not None:
-                model_filename = f"{table_name}_model.pkl"
-                model = joblib.load(model_filename)
-                scaler = StandardScaler()
-                flat_features_scaled = scaler.fit_transform([flat_features])
-                prediction = model.predict(flat_features_scaled)[0]
-                if prediction in ['VH', 'VB']:
-                    message = f"A {prediction} breakout detected today for {symbol}"
-                    send_telegram_message(message)
+        today_breakouts = df[df['Breakout Type'] > 0]
+        for _, breakout in today_breakouts.iterrows():
+            features = extract_and_flatten_features(df, breakout.name)
+            if features.size == 0:
+                continue
+            model = joblib.load(f"{table_name}_model.pkl")
+            scaler = StandardScaler()
+            features_scaled = scaler.fit_transform(features.reshape(1, -1))
+            prediction = model.predict(features_scaled)
+            if prediction[0] in ['VH', 'VB']:
+                message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
+                send_telegram_message(message)
     
     engine.dispose()
 
