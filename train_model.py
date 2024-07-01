@@ -54,7 +54,7 @@ def get_last_date(conn, table_name):
     if not table_exists(conn, table_name):
         return '2010-01-01'
     
-    query = f'SELECT MAX(Date) FROM {SNOWFLAKE_CONN["schema"]}.{table_name}'
+    query = f'SELECT MAX("Date") FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
     cursor = conn.cursor()
     cursor.execute(query)
     last_date = cursor.fetchone()[0]
@@ -69,14 +69,14 @@ def get_last_date(conn, table_name):
 def create_table_if_not_exists(conn, table_name):
     cursor = conn.cursor()
     cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS {SNOWFLAKE_CONN['schema']}.{table_name.upper()} (
-            Date DATE, 
-            Open FLOAT, 
-            High FLOAT, 
-            Low FLOAT, 
-            Close FLOAT, 
-            Adj_Close FLOAT, 
-            Volume FLOAT
+        CREATE TABLE IF NOT EXISTS "{SNOWFLAKE_CONN['schema']}"."{table_name.upper()}" (
+            "Date" DATE, 
+            "Open" FLOAT, 
+            "High" FLOAT, 
+            "Low" FLOAT, 
+            "Close" FLOAT, 
+            "Adj_Close" FLOAT, 
+            "Volume" FLOAT
         )
     """)
     cursor.close()
@@ -133,7 +133,7 @@ def collect_channel(df, candle, backcandles, window=1):
     highs, idxhighs = localdf[localdf['SAR Reversals'] == 1].High.values, localdf[localdf['SAR Reversals'] == 1].High.index
     lows, idxlows = localdf[localdf['SAR Reversals'] == 2].Low.values, localdf[localdf['SAR Reversals'] == 2].Low.index
     if len(lows) >= 2 and len(highs) >= 2:
-        sl_lows, interc_lows, _, _, _ = stats.linregress(idxlows, lows)
+        sl_lows, interc_lows, sl_highs, interc_highs, _, _ = stats.linregress(idx lows, lows)
         sl_highs, interc_highs, _, _, _ = stats.linregress(idxhighs, highs)
         return sl_lows, interc_lows, sl_highs, interc_highs, 0, 0
     else:
@@ -298,7 +298,7 @@ def main():
             print(f"Table {table_name} does not exist")
             continue
 
-        df = pd.read_sql(f'SELECT * FROM {SNOWFLAKE_CONN["schema"]}.{table_name}', engine)
+        df = pd.read_sql(f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"', engine)
 
         # Calculate indicators and detect breakouts
         df = calculate_all_indicators(df)
