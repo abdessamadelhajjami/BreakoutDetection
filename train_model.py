@@ -54,13 +54,13 @@ def load_data_to_snowflake(conn, df, table_name):
     # Créer la table si elle n'existe pas
     cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS {table_name} (
-            'Date' DATE, 
-            'Open' FLOAT, 
-            'High' FLOAT, 
-            'Low' FLOAT, 
-            'Close' FLOAT, 
-            'Adj_Close' FLOAT, 
-            'Volume' FLOAT
+            Date DATE, 
+            Open FLOAT, 
+            High FLOAT, 
+            Low FLOAT, 
+            Close FLOAT, 
+            Adj_Close FLOAT, 
+            Volume FLOAT
         )
     """)
 
@@ -167,7 +167,7 @@ def main():
 
         if result[0][0] > 0:
             max_date_result = session.sql(f"""
-                SELECT MAX(Date) FROM {SNOWFLAKE_CONN['schema']}.{table_name}
+                SELECT MAX("Date") FROM {SNOWFLAKE_CONN['schema']}.{table_name}
             """).collect()
             max_date = max_date_result[0][0]
             start_date = (pd.Timestamp(max_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
@@ -214,4 +214,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
