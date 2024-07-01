@@ -333,8 +333,9 @@ def main():
             with tempfile.TemporaryDirectory() as tmpdirname:
                 local_model_path = os.path.join(tmpdirname, model_filename)
                 
-                conn.cursor().execute(f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}")
-
+                conn.cursor().execute(f"USE DATABASE YAHOOFINANCEDATA")
+                conn.cursor().execute(f"GET @STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}")
+            
                 model = joblib.load(local_model_path)
                 print("YEEP2")
                 scaler = StandardScaler()
