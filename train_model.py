@@ -332,7 +332,8 @@ def main():
                 os.makedirs(local_model_path)
             local_model_path = os.path.join(local_model_path, model_filename)
             
-            session.cursor().execute(f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}")
+            conn.cursor().execute(f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}")
+
             model = joblib.load(local_model_path)
             print("YEEP2")
             scaler = StandardScaler()
