@@ -23,9 +23,13 @@ SNOWFLAKE_CONN = {
     'schema': 'SP500',
 }
 
+# Updated function to get SP500 components excluding 'BRK.B'
 def get_sp500_components():
     df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
-    return df["Symbol"].tolist()
+    symbols = df["Symbol"].tolist()
+    if "BRK.B" in symbols:
+        symbols.remove("BRK.B")
+    return symbols
 
 def download_sp500_data(symbol, start, end):
     data = yf.download(symbol, start=start, end=end)
