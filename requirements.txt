@@ -7,3 +7,4 @@ yfinance
 requests
 snowflake-connector-python
 snowflake-snowpark-python
+sqlalchemy
