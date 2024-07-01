@@ -46,13 +46,41 @@ def download_sp500_data(symbol, start, end):
     data = yf.download(symbol, start=start, end=end)
     return data
 
-# Load data into Snowflake
-def load_data_to_snowflake(session, df, table_name):
-    df.reset_index(inplace=True)
+# Check if table exists
+def table_exists(conn, table_name):
+    query = f"""
+    SELECT COUNT(*)
+    FROM information_schema.tables 
+    WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'
+    AND table_name = '{table_name.upper()}';
+    """
+    cursor = conn.cursor()
+    cursor.execute(query)
+    result = cursor.fetchone()[0]
+    cursor.close()
+    return result > 0
+
+# Get the last date from the table
+def get_last_date(conn, table_name):
+    if not table_exists(conn, table_name):
+        return '2010-01-01'
     
-    # Créer la table si elle n'existe pas
-    session.sql(f"""
-        CREATE TABLE IF NOT EXISTS {table_name} (
+    query = f'SELECT MAX("Date") FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
+    cursor = conn.cursor()
+    cursor.execute(query)
+    last_date = cursor.fetchone()[0]
+    cursor.close()
+    
+    if last_date is None:
+        return '2010-01-01'
+    else:
+        return (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+
+# Create table if it does not exist
+def create_table_if_not_exists(conn, table_name):
+    cursor = conn.cursor()
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS "{SNOWFLAKE_CONN['schema']}"."{table_name.upper()}" (
             "Date" DATE, 
             "Open" FLOAT, 
             "High" FLOAT, 
@@ -61,10 +89,26 @@ def load_data_to_snowflake(session, df, table_name):
             "Adj_Close" FLOAT, 
             "Volume" FLOAT
         )
-    """).collect()
+    """)
+    cursor.close()
 
-    # Insérer les données dans la table
-    session.write_pandas(df, table_name)
+# Load data into Snowflake using `write_pandas`
+def load_data_to_snowflake(conn, df, table_name):
+    # Create the table if it doesn't exist
+    create_table_if_not_exists(conn, table_name)
+    
+    # Reset the index
+    df.reset_index(inplace=True)
+    
+    # Rename columns to avoid invalid identifiers
+    df.columns = [col.replace(' ', '_') for col in df.columns]
+    
+    # Ensure 'Date' column is of type string
+    df['Date'] = df['Date'].astype(str)
+    
+    # Insert data using `write_pandas`
+    success, nchunks, nrows, _ = snowflake.connector.pandas_tools.write_pandas(conn, df, table_name.upper())
+    return success, nchunks, nrows
 
 # Calculate pivot reversals
 def calculate_pivot_reversals(df, window=3):
@@ -88,8 +132,8 @@ def calculate_pivot_reversals(df, window=3):
 # Collect channel information
 def collect_channel(df, candle, backcandles, window=1):
     localdf = df[candle-backcandles-window:candle-window]
-    highs, idxhighs = localdf[localdf['SAR Reversals'] == 1].High.values, localdf[localdf['SAR Reversals'] == 1].High.index
-    lows, idxlows = localdf[localdf['SAR Reversals'] == 2].Low.values, localdf[localdf['SAR Reversals'] == 2].Low.index
+    highs, idxhighs = localdf[localdf['SAR_Reversals'] == 1].High.values, localdf[localdf['SAR_Reversals'] == 1].High.index
+    lows, idxlows = localdf[localdf['SAR_Reversals'] == 2].Low.values, localdf[localdf['SAR_Reversals'] == 2].Low.index
     if len(lows) >= 2 and len(highs) >= 2:
         sl_lows, interc_lows, _, _, _ = stats.linregress(idxlows, lows)
         sl_highs, interc_highs, _, _, _ = stats.linregress(idxhighs, highs)
@@ -215,51 +259,36 @@ def extract_and_flatten_features(candle, df):
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
 
-# Fonction principale
+# Main function
 def main():
-    connection_parameters = {
-        'account': SNOWFLAKE_CONN['account'],
-        'user': SNOWFLAKE_CONN['user'],
-        'password': SNOWFLAKE_CONN['password'],
-        'warehouse': SNOWFLAKE_CONN['warehouse'],
-        'database': SNOWFLAKE_CONN['database'],
-        'schema': SNOWFLAKE_CONN['schema']
-    }
-    session = snowpark.Session.builder.configs(connection_parameters).create()
+    conn = snowflake.connector.connect(
+        user=SNOWFLAKE_CONN['user'],
+        password=SNOWFLAKE_CONN['password'],
+        account=SNOWFLAKE_CONN['account'],
+        warehouse=SNOWFLAKE_CONN['warehouse'],
+        database=SNOWFLAKE_CONN['database'],
+        schema=SNOWFLAKE_CONN['schema']
+    )
     symbols = get_sp500_components()
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
 
     for symbol in symbols:
         print(f"Processing {symbol}")
-        table_name = f"ohlcv_data_{symbol}"
-
-        # Check if table exists and get the max date
-        result = session.sql(f"""
-            SELECT COUNT(*) 
-            FROM information_schema.tables 
-            WHERE table_schema = '{SNOWFLAKE_CONN['schema']}' 
-              AND table_name = '{table_name.upper()}'
-        """).collect()
-
-        if result[0][0] > 0:
-            max_date_result = session.sql(f"""
-                SELECT MAX("Date") FROM {SNOWFLAKE_CONN['schema']}.{table_name}
-            """).collect()
-            max_date = max_date_result[0][0]
-            start_date = (pd.Timestamp(max_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-        else:
-            start_date = '2010-01-01'
-
-        # Download data
-        data = download_sp500_data(symbol, start_date, end_date)
-        data.reset_index(inplace=True)
-
+        table_name = f'ohlcv_data_{symbol}'.upper()
+        last_date = get_last_date(conn, table_name)
+        data = download_sp500_data(symbol, last_date, end_date)
         if not data.empty:
-            load_data_to_snowflake(session, data, table_name)
+            success, nchunks, nrows = load_data_to_snowflake(conn, data, table_name)
+            print(f"Data loaded: {success}, {nchunks} chunks, {nrows} rows")
         else:
             print(f"No new data for {symbol}")
 
+    conn.close()
+
+    # Reconnect using snowpark
+    session = snowpark.Session.builder.configs(connection_parameters).create()
     tables = session.sql(f"SELECT DISTINCT table_name FROM information_schema.tables WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'").collect()
+    
     for table in tables:
         df = session.table(table['TABLE_NAME']).to_pandas()
         df = calculate_all_indicators(df)
