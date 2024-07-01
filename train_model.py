@@ -54,13 +54,13 @@ def load_data_to_snowflake(conn, df, table_name):
     # Créer la table si elle n'existe pas
     cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS {table_name} (
-            Date DATE, 
-            Open FLOAT, 
-            High FLOAT, 
-            Low FLOAT, 
-            Close FLOAT, 
-            Adj_Close FLOAT, 
-            Volume FLOAT
+            "Date" DATE, 
+            "Open" FLOAT, 
+            "High" FLOAT, 
+            "Low" FLOAT, 
+            "Close" FLOAT, 
+            "Adj_Close" FLOAT, 
+            "Volume" FLOAT
         )
     """)
 
