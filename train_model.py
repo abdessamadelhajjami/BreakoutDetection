@@ -19,7 +19,7 @@ SNOWFLAKE_CONN = {
     'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
     'user': 'AELHAJJAMI',
     'password': 'Abdou3012',
-    'warehouse': 'COMPUTE_WH',
+    'warehouse': 'CRYPTO_WH',
     'database': 'BREAKOUDETECTIONDB',
     'schema': 'SP500',
 }
@@ -53,7 +53,7 @@ def get_last_date(conn, table_name):
     if not table_exists(conn, table_name):
         return '2010-01-01'
     
-    query = f'SELECT MAX("Date") FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
+    query = f'SELECT MAX(Date) FROM {SNOWFLAKE_CONN["schema"]}.{table_name}'
     cursor = conn.cursor()
     cursor.execute(query)
     last_date = cursor.fetchone()[0]
@@ -68,14 +68,14 @@ def get_last_date(conn, table_name):
 def create_table_if_not_exists(conn, table_name):
     cursor = conn.cursor()
     cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS "{SNOWFLAKE_CONN['schema']}"."{table_name.upper()}" (
-            "Date" DATE, 
-            "Open" FLOAT, 
-            "High" FLOAT, 
-            "Low" FLOAT, 
-            "Close" FLOAT, 
-            "Adj_Close" FLOAT, 
-            "Volume" FLOAT
+        CREATE TABLE IF NOT EXISTS {SNOWFLAKE_CONN['schema']}.{table_name.upper()} (
+            Date DATE, 
+            Open FLOAT, 
+            High FLOAT, 
+            Low FLOAT, 
+            Close FLOAT, 
+            Adj_Close FLOAT, 
+            Volume FLOAT
         )
     """)
     cursor.close()
@@ -129,8 +129,8 @@ def isBreakOut(df, candle, window=1):
 # Collect channel information
 def collect_channel(df, candle, backcandles, window=1):
     localdf = df[candle-backcandles-window:candle-window]
-    highs, idxhighs = localdf[localdf['SAR_Reversals'] == 1].High.values, localdf[localdf['SAR_Reversals'] == 1].High.index
-    lows, idxlows = localdf[localdf['SAR_Reversals'] == 2].Low.values, localdf[localdf['SAR_Reversals'] == 2].Low.index
+    highs, idxhighs = localdf[localdf['SAR Reversals'] == 1].High.values, localdf[localdf['SAR Reversals'] == 1].High.index
+    lows, idxlows = localdf[localdf['SAR Reversals'] == 2].Low.values, localdf[localdf['SAR Reversals'] == 2].Low.index
     if len(lows) >= 2 and len(highs) >= 2:
         sl_lows, interc_lows, _, _, _ = stats.linregress(idxlows, lows)
         sl_highs, interc_highs, _, _, _ = stats.linregress(idxhighs, highs)
@@ -150,34 +150,24 @@ def line_crosses_candles(data, slope, intercept, start_index, end_index):
             body_crosses += 1
     return body_crosses > 1
 
-# Calculate pivot reversals
-def calculate_pivot_reversals(df, window=3):
-    pivot_series = pd.Series([0]*len(df), index=df.index)
-    for candle in range(window, len(df) - window):
-        pivotHigh, pivotLow = True, True
-        current_high, current_low = df.iloc[candle]['High'], df.iloc[candle]['Low']
-        for i in range(candle-window, candle+window+1):
-            if df.iloc[i]['Low'] < current_low:
-                pivotLow = False
-            if df.iloc[i]['High'] > current_high:
-                pivotHigh = False
-        if pivotHigh and pivotLow:
-            pivot_series[candle] = 3  
-        elif pivotHigh:
-            pivot_series[candle] = 2
-        elif pivotLow:
-            pivot_series[candle] = 1
-    return pivot_series
-
-# Calculate indicators
-def calculate_all_indicators(df):
-    df = calculate_sma(df, [7, 20, 50, 200])
-    df = calculate_macd(df)
-    df = calculate_rsi(df)
-    df = calculate_bbands(df)
-    df = calculate_volume_ma(df)
-    df = calculate_keltner_channel(df)
-    return df
+# Confirm breakout
+def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
+    if breakout_index + confirmation_candles >= len(df):
+        return None, None
+    breakout_type = df.loc[breakout_index, 'Breakout Type']
+    breakout_price = df.loc[breakout_index, 'Intercept']
+    last_confirmed_price = df.iloc[breakout_index + confirmation_candles]['Close']
+    price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
+    if breakout_type == 1:
+        if price_variation_percentage <= -threshold_percentage:
+            return 'VB', price_variation_percentage
+        else:
+            return 'FB', price_variation_percentage
+    elif breakout_type == 2:
+        if price_variation_percentage >= threshold_percentage:
+            return 'VH', price_variation_percentage
+        else:
+            return 'FH', price_variation_percentage
 
 def calculate_sma(df, periods):
     for period in periods:
@@ -225,6 +215,16 @@ def calculate_keltner_channel(df, ema_period=20, atr_period=20, multiplier=2):
     df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']
     return df
 
+# Calculate indicators
+def calculate_all_indicators(df):
+    df = calculate_sma(df, [7, 20, 50, 200])
+    df = calculate_macd(df)
+    df = calculate_rsi(df)
+    df = calculate_bbands(df)
+    df = calculate_volume_ma(df)
+    df = calculate_keltner_channel(df)
+    return df
+
 # Extract and flatten features
 def extract_and_flatten_features(candle, df):
     if candle < 14:
@@ -242,20 +242,30 @@ def extract_and_flatten_features(candle, df):
     normalized_data['Norm_Keltner_Low'] = (data_window['Keltner_Low'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
     normalized_data['Slope'] = df['Slope'].iloc[candle]
     normalized_data['Intercept'] = df['Intercept'].iloc[candle]
-    normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
+    normalized_data['Breakout_Type'] = df['Breakout Type'].iloc[candle]
     flattened_features = normalized_data.values.flatten().tolist()
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
 
-# Send Telegram message
-def send_telegram_message(message):
-    payload = {
-        'chat_id': TELEGRAM_CHAT_ID,
-        'text': message
-    }
-    response = requests.post(TELEGRAM_API_URL, data=payload)
-    if response.status_code != 200:
-        print(f"Failed to send message: {response.text}")
+# Detect and label breakouts
+def detect_and_label_breakouts(df):
+    Breakout_indices = []
+    Breakout_confirmed = []
+    Breakout_percentage = []
+
+    for index in df.index:
+        if df.loc[index, 'Breakout Type'] in [1, 2]:
+            result = confirm_breakout(df, index)
+            if result:
+                confirmation_label, variation = result
+                df.at[index, 'Breakout_Confirmed'] = confirmation_label
+                df.at[index, 'Price_Variation_Percentage'] = variation
+                Breakout_indices.append(index)
+                Breakout_confirmed.append(confirmation_label)
+                Breakout_percentage.append(variation)
+    if 'Breakout_Confirmed' not in df.columns:
+        df['Breakout_Confirmed'] = pd.NA
+    return df
 
 # Main function
 def main():
@@ -268,12 +278,10 @@ def main():
         schema=SNOWFLAKE_CONN['schema']
     )
     
-    # SQLAlchemy engine for reading data
-    engine = create_engine(f'snowflake://{SNOWFLAKE_CONN["user"]}:{SNOWFLAKE_CONN["password"]}@{SNOWFLAKE_CONN["account"]}/{SNOWFLAKE_CONN["database"]}/{SNOWFLAKE_CONN["schema"]}?warehouse={SNOWFLAKE_CONN["warehouse"]}')
-    
     symbols = get_sp500_components()
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
-
+    engine = create_engine(f'snowflake+snowflakeconnector://{SNOWFLAKE_CONN["user"]}:{SNOWFLAKE_CONN["password"]}@{SNOWFLAKE_CONN["account"]}/{SNOWFLAKE_CONN["database"]}/{SNOWFLAKE_CONN["schema"]}?warehouse={SNOWFLAKE_CONN["warehouse"]}')
+    
     for symbol in symbols:
         print(f"Processing {symbol}")
         table_name = f'ohlcv_data_{symbol}'.upper()
@@ -285,30 +293,33 @@ def main():
         else:
             print(f"No new data for {symbol}")
 
-        # Check for breakouts in today's data
-        df = pd.read_sql(f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"', engine)
-        if df.empty:
+    # Check for breakouts
+    for symbol in symbols:
+        table_name = f'ohlcv_data_{symbol}'.upper()
+        if not table_exists(conn, table_name):
+            print(f"Table {table_name} does not exist")
             continue
-        
-        df = calculate_all_indicators(df)
-        df['SAR_Reversals'] = calculate_pivot_reversals(df)
 
-        today_breakouts = [isBreakOut(df, i) for i in range(len(df)) if df.iloc[i]['Date'] == end_date]
-        for result in today_breakouts:
-            breakout_type, slope, intercept = result
-            if breakout_type in [1, 2]:
-                features = extract_and_flatten_features(df.index[df['Date'] == end_date][0], df)
-                if features is not None:
-                    model_filename = f"{table_name}_model.pkl"
-                    model = joblib.load(model_filename)
-                    imputer = SimpleImputer(strategy='mean')
-                    scaler = StandardScaler()
-                    features = imputer.transform([features])
-                    features = scaler.transform(features)
-                    prediction = model.predict(features)[0]
-                    if prediction in ['VH', 'VB']:
-                        message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction} on {end_date}"
-                        send_telegram_message(message)
+        df = pd.read_sql(f'SELECT * FROM {SNOWFLAKE_CONN["schema"]}.{table_name}', engine)
+
+        # Calculate indicators and detect breakouts
+        df = calculate_all_indicators(df)
+        df['SAR Reversals'] = calculate_pivot_reversals(df)
+        results = [isBreakOut(df, i) for i in range(len(df))]
+        df['Breakout Type'] = [r[0] for r in results]
+        df['Slope'] = [r[1] for r in results]
+        df['Intercept'] = [r[2] for r in results]
+        
+        # Check for today's breakout
+        today_index = df.index[-1]
+        if df.at[today_index, 'Breakout Type'] in [1, 2]:
+            features = extract_and_flatten_features(today_index, df)
+            if features is not None:
+                model = joblib.load(f"{table_name}_model.pkl")
+                prediction = model.predict(features.reshape(1, -1))
+                if prediction[0] in ['VH', 'VB']:
+                    message = f"A True {prediction[0]} breakout detected today for the action {symbol}."
+                    send_telegram_message(message)
 
     conn.close()
 
