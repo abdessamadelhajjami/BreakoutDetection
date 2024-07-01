@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
+from sqlalchemy import create_engine
 import joblib
 import requests
 from scipy import stats
@@ -267,6 +268,9 @@ def main():
         schema=SNOWFLAKE_CONN['schema']
     )
     
+    # SQLAlchemy engine for reading data
+    engine = create_engine(f'snowflake://{SNOWFLAKE_CONN["user"]}:{SNOWFLAKE_CONN["password"]}@{SNOWFLAKE_CONN["account"]}/{SNOWFLAKE_CONN["database"]}/{SNOWFLAKE_CONN["schema"]}?warehouse={SNOWFLAKE_CONN["warehouse"]}')
+    
     symbols = get_sp500_components()
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
 
@@ -282,7 +286,7 @@ def main():
             print(f"No new data for {symbol}")
 
         # Check for breakouts in today's data
-        df = pd.read_sql(f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"', conn)
+        df = pd.read_sql(f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"', engine)
         if df.empty:
             continue
         
