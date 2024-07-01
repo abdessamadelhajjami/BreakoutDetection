@@ -1,9 +1,9 @@
 import yfinance as yf
 import pandas as pd
+import numpy as np
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
 import joblib
-import numpy as np
 import requests
 from scipy import stats
 from sklearn.impute import SimpleImputer
@@ -281,9 +281,7 @@ def main():
         else:
             print(f"No new data for {symbol}")
 
-    for symbol in symbols:
-        print(f"Checking for breakouts in {symbol}")
-        table_name = f'ohlcv_data_{symbol}'.upper()
+        # Check for breakouts in today's data
         df = pd.read_sql(f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"', conn)
         if df.empty:
             continue
@@ -291,15 +289,11 @@ def main():
         df = calculate_all_indicators(df)
         df['SAR_Reversals'] = calculate_pivot_reversals(df)
 
-        results = [isBreakOut(df, i) for i in range(len(df))]
-        df['Breakout_Type'] = [r[0] for r in results]
-        df['Slope'] = [r[1] for r in results]
-        df['Intercept'] = [r[2] for r in results]
-
-        breakouts_today = df[df['Date'] == end_date]
-        for index, row in breakouts_today.iterrows():
-            if row['Breakout_Type'] in [1, 2]:
-                features = extract_and_flatten_features(index, df)
+        today_breakouts = [isBreakOut(df, i) for i in range(len(df)) if df.iloc[i]['Date'] == end_date]
+        for result in today_breakouts:
+            breakout_type, slope, intercept = result
+            if breakout_type in [1, 2]:
+                features = extract_and_flatten_features(df.index[df['Date'] == end_date][0], df)
                 if features is not None:
                     model_filename = f"{table_name}_model.pkl"
                     model = joblib.load(model_filename)
@@ -309,7 +303,7 @@ def main():
                     features = scaler.transform(features)
                     prediction = model.predict(features)[0]
                     if prediction in ['VH', 'VB']:
-                        message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction} on {row['Date']}"
+                        message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction} on {end_date}"
                         send_telegram_message(message)
 
     conn.close()
