@@ -285,12 +285,12 @@ def main():
         print(f"Processing {symbol}")
         table_name = f'ohlcv_data_{symbol}'.upper()
         last_date = get_last_date(conn, table_name)
-        data = download_sp500_data(symbol, last_date, end_date)
-        if not data.empty:
-            success, nchunks, nrows = load_data_to_snowflake(conn, data, table_name)
-            print(f"Data loaded: {success}, {nchunks} chunks, {nrows} rows")
-        else:
-            print(f"No new data for {symbol}")
+        # data = download_sp500_data(symbol, last_date, end_date)
+        # if not data.empty:
+        #     success, nchunks, nrows = load_data_to_snowflake(conn, data, table_name)
+        #     print(f"Data loaded: {success}, {nchunks} chunks, {nrows} rows")
+        # else:
+        #     print(f"No new data for {symbol}")
 
         # Vérifier les breakouts
         query = f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
