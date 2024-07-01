@@ -28,7 +28,9 @@ def get_sp500_components():
     df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
     symbols = df["Symbol"].tolist()
     if "BRK.B" in symbols:
-        symbols.remove("BRK.B")
+        symbols.remove("BRK.B") 
+    if "BF.B" in symbols:
+        symbols.remove("BF.B")
     return symbols
 
 def download_sp500_data(symbol, start, end):
