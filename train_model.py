@@ -133,7 +133,7 @@ def collect_channel(df, candle, backcandles, window=1):
     highs, idxhighs = localdf[localdf['SAR Reversals'] == 1].High.values, localdf[localdf['SAR Reversals'] == 1].High.index
     lows, idxlows = localdf[localdf['SAR Reversals'] == 2].Low.values, localdf[localdf['SAR Reversals'] == 2].Low.index
     if len(lows) >= 2 and len(highs) >= 2:
-        sl_lows, interc_lows, sl_highs, interc_highs, _, _ = stats.linregress(idx lows, lows)
+        sl_lows, interc_lows, sl_highs, interc_highs, _, _ = stats.linregress(idxlows, lows)
         sl_highs, interc_highs, _, _, _ = stats.linregress(idxhighs, highs)
         return sl_lows, interc_lows, sl_highs, interc_highs, 0, 0
     else:
