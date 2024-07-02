@@ -325,6 +325,7 @@ if __name__ == '__main__':
         if breakout_type > 0:
             print("YEPP1")
             features = extract_and_flatten_features(df, today_idx)
+            print("YEPP1")
             if features.size == 0:
                 continue
             
