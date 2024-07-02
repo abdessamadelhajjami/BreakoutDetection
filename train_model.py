@@ -4,59 +4,47 @@ import numpy as np
 from scipy import stats
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
-import joblib
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
+import joblib
+import os
 import requests
-import os 
 import tempfile
-
 
 # Telegram bot configuration
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
 TELEGRAM_CHAT_ID = "-1002197712630"
 
-# Snowflake connection configuration
-SNOWFLAKE_CONN = {
-    'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
-    'user': 'AELHAJJAMI',
-    'password': 'Abdou3012',
-    'warehouse': 'COMPUTE_WH',
-    'database': 'BREAKOUDETECTIONDB',
-    'schema': 'SP500',
-}
+def send_telegram_message(message):
+    response = requests.post(
+        TELEGRAM_API_URL,
+        json={"chat_id": TELEGRAM_CHAT_ID, "text": message}
+    )
+    print(f"Telegram response: {response.json()}")
 
-# Updated function to get SP500 components excluding 'BRK.B'
 def get_sp500_components():
     df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
-    symbols = df["Symbol"].tolist()
-    if "BRK.B" in symbols:
-        symbols.remove("BRK.B") 
-    if "BF.B" in symbols:
-        symbols.remove("BF.B")
-    return symbols
+    return df["Symbol"].tolist()
 
 def download_sp500_data(symbol, start, end):
     data = yf.download(symbol, start=start, end=end)
     return data
 
-def table_exists(conn, table_name):
+def table_exists(conn, schema, table_name):
     query = f"""
     SELECT COUNT(*)
     FROM information_schema.tables 
-    WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'
+    WHERE table_schema = '{schema}'
     AND table_name = '{table_name.upper()}';
     """
-    cursor = conn.cursor()
-    cursor.execute(query)
-    result = cursor.fetchone()[0]
-    cursor.close()
+    result = conn.cursor().execute(query).fetchone()[0]
     return result > 0
 
-def get_last_date(conn, table_name):
-    if not table_exists(conn, table_name):
+def get_last_date(conn, schema, table_name):
+    if not table_exists(conn, schema, table_name):
         return '2010-01-01'
     
-    query = f'SELECT MAX("Date") FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
+    query = f'SELECT MAX("Date") FROM "{schema}"."{table_name}"'
     cursor = conn.cursor()
     cursor.execute(query)
     last_date = cursor.fetchone()[0]
@@ -67,10 +55,10 @@ def get_last_date(conn, table_name):
     else:
         return (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
 
-def create_table_if_not_exists(conn, table_name):
+def create_table_if_not_exists(conn, schema, table_name):
     cursor = conn.cursor()
     cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS "{SNOWFLAKE_CONN['schema']}"."{table_name.upper()}" (
+        CREATE TABLE IF NOT EXISTS "{schema}"."{table_name.upper()}" (
             "Date" DATE, 
             "Open" FLOAT, 
             "High" FLOAT, 
@@ -82,17 +70,54 @@ def create_table_if_not_exists(conn, table_name):
     """)
     cursor.close()
 
-def load_data_to_snowflake(conn, df, table_name):
-    create_table_if_not_exists(conn, table_name)
-    
+def load_data_to_snowflake(conn, df, schema, table_name):
+    create_table_if_not_exists(conn, schema, table_name)
     df.reset_index(inplace=True)
     df.columns = [col.replace(' ', '_') for col in df.columns]
     df['Date'] = df['Date'].astype(str)
-    
-    success, nchunks, nrows, _ = write_pandas(conn, df, f"{SNOWFLAKE_CONN['schema']}.{table_name.upper()}")
+    success, nchunks, nrows, _ = write_pandas(conn, df, table_name.upper())
     return success, nchunks, nrows
-    
-# Detect breakout using isBreakOut
+
+def calculate_pivot_reversals(df, window=3):
+    pivot_series = pd.Series([0]*len(df), index=df.index)
+    for candle in range(window, len(df) - window):
+        pivotHigh, pivotLow = True, True
+        current_high, current_low = df.iloc[candle]['High'], df.iloc[candle]['Low']
+        for i in range(candle-window, candle+window+1):
+            if df.iloc[i]['Low'] < current_low:
+                pivotLow = False
+            if df.iloc[i]['High'] > current_high:
+                pivotHigh = False
+        if pivotHigh and pivotLow:
+            pivot_series[candle] = 3  
+        elif pivotHigh:
+            pivot_series[candle] = 2
+        elif pivotLow:
+            pivot_series[candle] = 1
+    return pivot_series
+
+def collect_channel(df, candle, backcandles, window=1):
+    localdf = df[candle-backcandles-window:candle-window]
+    highs, idxhighs = localdf[localdf['SAR Reversals'] == 1].High.values, localdf[localdf['SAR Reversals'] == 1].High.index
+    lows, idxlows = localdf[localdf['SAR Reversals'] == 2].Low.values, localdf[localdf['SAR Reversals'] == 2].Low.index
+    if len(lows) >= 2 and len(highs) >= 2:
+        sl_lows, interc_lows, sl_highs, interc_highs, _, _ = stats.linregress(idxhighs, highs)
+        sl_highs, interc_highs, _, _, _ = stats.linregress(idxlows, lows)
+        return sl_lows, interc_lows, sl_highs, interc_highs, 0, 0
+    else:
+        return 0, 0, 0, 0, 0, 0
+
+def line_crosses_candles(data, slope, intercept, start_index, end_index):
+    body_crosses = 0
+    for i in range(start_index, end_index + 1):
+        candle = data.iloc[i]
+        predicted_price = intercept + slope * (i - start_index)
+        open_price, close_price = candle['Open'], candle['Close']
+        body_high, body_low = max(open_price, close_price), min(open_price, close_price)
+        if body_low <= predicted_price <= body_high:
+            body_crosses += 1
+    return body_crosses > 1
+
 def isBreakOut(df, candle, window=1):
     for backcandles in [14, 20, 40, 60]:  
         if (candle - backcandles - window) < 0:
@@ -120,128 +145,59 @@ def isBreakOut(df, candle, window=1):
             return 1, sl_lows, interc_lows
     return 0, None, None
 
-
-# Collect channel information
-def collect_channel(df, candle, backcandles, window=1):
-    localdf = df[candle-backcandles-window:candle-window]
-    highs, idxhighs = localdf[localdf['SAR Reversals'] == 1].High.values, localdf[localdf['SAR Reversals'] == 1].High.index
-    lows, idxlows = localdf[localdf['SAR Reversals'] == 2].Low.values, localdf[localdf['SAR Reversals'] == 2].Low.index
-    if len(lows) >= 2 and len(highs) >= 2:
-        sl_lows, interc_lows, sl_highs, interc_highs, _, _ = stats.linregress(idxlows, lows)
-        sl_highs, interc_highs, _, _, _ = stats.linregress(idxhighs, highs)
-        return sl_lows, interc_lows, sl_highs, interc_highs, 0, 0
-    else:
-        return 0, 0, 0, 0, 0, 0
-
-# Check if the line crosses candles
-def line_crosses_candles(data, slope, intercept, start_index, end_index):
-    body_crosses = 0
-    for i in range(start_index, end_index + 1):
-        candle = data.iloc[i]
-        predicted_price = intercept + slope * (i - start_index)
-        open_price, close_price = candle['Open'], candle['Close']
-        body_high, body_low = max(open_price, close_price), min(open_price, close_price)
-        if body_low <= predicted_price <= body_high:
-            body_crosses += 1
-    return body_crosses > 1
-
-
-# Calculate pivot reversals
-def calculate_pivot_reversals(df, window=3):
-    pivot_series = pd.Series([0]*len(df), index=df.index)
-    for candle in range(window, len(df) - window):
-        pivotHigh, pivotLow = True, True
-        current_high, current_low = df.iloc[candle]['High'], df.iloc[candle]['Low']
-        for i in range(candle-window, candle+window+1):
-            if df.iloc[i]['Low'] < current_low:
-                pivotLow = False
-            if df.iloc[i]['High'] > current_high:
-                pivotHigh = False
-        if pivotHigh and pivotLow:
-            pivot_series[candle] = 3  
-        elif pivotHigh:
-            pivot_series[candle] = 2
-        elif pivotLow:
-            pivot_series[candle] = 1
-    return pivot_series
-
-def calculate_sma(df, periods):
-    for period in periods:
-        sma_key = f'SMA_{period}'
-        df[sma_key] = df['Close'].rolling(window=period).mean()
-    return df
-
-def calculate_macd(df, fast_period=12, slow_period=26, signal_period=9):
-    exp1 = df['Close'].ewm(span=fast_period, adjust=False).mean()
-    exp2 = df['Close'].ewm(span=slow_period, adjust=False).mean()
-    macd = exp1 - exp2
-    signal = macd.ewm(span=signal_period, adjust=False).mean()
-    df['MACD'] = macd
-    df['MACD_signal'] = signal
-    return df
-
-def calculate_rsi(df, period=14):
+def calculate_all_indicators(df):
+    df['Pivot_Reversals'] = calculate_pivot_reversals(df)
+    df['SMA_7'] = df['Close'].rolling(window=7).mean()
+    df['SMA_20'] = df['Close'].rolling(window=20).mean()
+    df['SMA_50'] = df['Close'].rolling(window=50).mean()
+    df['SMA_200'] = df['Close'].rolling(window=200).mean()
+    exp1 = df['Close'].ewm(span=12, adjust=False).mean()
+    exp2 = df['Close'].ewm(span=26, adjust=False).mean()
+    df['MACD'] = exp1 - exp2
+    df['MACD_signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     delta = df['Close'].diff(1)
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
-    return df
-
-def calculate_bbands(df, period=20, std_dev=2):
-    mid_band = df['Close'].rolling(window=period).mean()
-    sd = df['Close'].rolling(window=period).std()
-    df['Bollinger_High'] = mid_band + (std_dev * sd)
-    df['Bollinger_Low'] = mid_band - (std_dev * sd)
+    mid_band = df['Close'].rolling(window=20).mean()
+    sd = df['Close'].rolling(window=20).std()
+    df['Bollinger_High'] = mid_band + (2 * sd)
+    df['Bollinger_Low'] = mid_band - (2 * sd)
     df['Bollinger_Mid'] = mid_band
-    return df
-
-def calculate_volume_ma(df, period=20):
-    df['Volume_MA'] = df['Volume'].rolling(window=period).mean()
-    return df
-
-def calculate_keltner_channel(df, ema_period=20, atr_period=20, multiplier=2):
-    df['Keltner_Mid'] = df['Close'].ewm(span=ema_period, adjust=False).mean()
+    df['Volume_MA'] = df['Volume'].rolling(window=20).mean()
+    df['Keltner_Mid'] = df['Close'].ewm(span=20, adjust=False).mean()
     high_low = df['High'] - df['Low']
     high_close = (df['High'] - df['Close'].shift()).abs()
     low_close = (df['Low'] - df['Close'].shift()).abs()
     ranges = pd.concat([high_low, high_close, low_close], axis=1)
-    df['ATR'] = ranges.max(axis=1).rolling(window=atr_period).mean()
-    df['Keltner_High'] = df['Keltner_Mid'] + multiplier * df['ATR']
-    df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']
-    return df
-
-
-# Calculate indicators
-def calculate_all_indicators(df):
-    df = calculate_sma(df, [7, 20, 50, 200])
-    df = calculate_macd(df)
-    df = calculate_rsi(df)
-    df = calculate_bbands(df)
-    df = calculate_volume_ma(df)
-    df = calculate_keltner_channel(df)
-    return df
-
-# Extract and flatten features
-def extract_and_flatten_features(df, candle):
-    # Vérifiez que l'index de la bougie est un entier
-    if isinstance(candle, pd.Timestamp):
-        candle = candle.to_pydatetime().date()
+    df['ATR'] = ranges.max(axis=1).rolling(window=20).mean()
+    df['Keltner_High'] = df['Keltner_Mid'] + 2 * df['ATR']
+    df['Keltner_Low'] = df['Keltner_Mid'] - 2 * df['ATR']
     
-    # Assurez-vous que 'candle' est un entier
-    if isinstance(candle, pd.DatetimeIndex):
-        candle = candle[-1].to_pydatetime().date()
+    # Add Slope and Intercept calculation for all rows
+    slopes = []
+    intercepts = []
+    breakout_types = []
+    for i in range(len(df)):
+        breakout_type, slope, intercept = isBreakOut(df, i)
+        slopes.append(slope)
+        intercepts.append(intercept)
+        breakout_types.append(breakout_type)
+    df['Slope'] = slopes
+    df['Intercept'] = intercepts
+    df['Breakout_Type'] = breakout_types
+    
+    return df
 
+def extract_and_flatten_features(df, candle):
     if candle < 14:
-        return None
-
+        return np.array([])
     data_window = df.iloc[candle-14:candle]
     normalized_data = pd.DataFrame()
-
     for period in [7, 20, 50, 200]:
         sma_key = f'SMA_{period}'
         normalized_data[f'Norm_{sma_key}'] = data_window[sma_key] / data_window['Close']
-
     normalized_data['Norm_MACD'] = (data_window['MACD'] - data_window['MACD'].mean()) / data_window['MACD'].std()
     normalized_data['Norm_RSI'] = (data_window['RSI'] - data_window['RSI'].mean()) / data_window['RSI'].std()
     normalized_data['Norm_Bollinger_Width'] = (data_window['Bollinger_High'] - data_window['Bollinger_Low']) / data_window['Bollinger_Mid']
@@ -250,114 +206,96 @@ def extract_and_flatten_features(df, candle):
     normalized_data['Norm_Keltner_Low'] = (data_window['Keltner_Low'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
     normalized_data['Slope'] = df['Slope'].iloc[candle]
     normalized_data['Intercept'] = df['Intercept'].iloc[candle]
-    normalized_data['Breakout_Type'] = df['Breakout Type'].iloc[candle]
-
+    normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
     flattened_features = normalized_data.values.flatten().tolist()
+    flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
 
-
-
-
-
-# Send Telegram notification
-def send_telegram_message(message):
-    payload = {
-        'chat_id': TELEGRAM_CHAT_ID,
-        'text': message
+def main():
+    SP500_CONN = {
+        'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
+        'user': 'AELHAJJAMI',
+        'password': 'Abdou3012',
+        'warehouse': 'COMPUTE_WH',
+        'database': 'BREAKOUDETECTIONDB',
+        'schema': 'SP500',
     }
-    response = requests.post(TELEGRAM_API_URL, data=payload)
-    if response.status_code != 200:
-        print(f"Failed to send message: {response.text}")
 
-
-
-def read_data_from_snowflake(conn, table_name):
-    query = f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
-    cursor = conn.cursor()
-    cursor.execute(query)
-    rows = cursor.fetchall()
-    columns = [desc[0] for desc in cursor.description]
-    df = pd.DataFrame(rows, columns=columns)
-    cursor.close()
-    return df
-
-if __name__ == '__main__':
-    symbols = get_sp500_components()
-    end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
+    YAHOO_CONN = {
+        'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
+        'user': 'AELHAJJAMI',
+        'password': 'Abdou3012',
+        'warehouse': 'COMPUTE_WH',
+        'database': 'YAHOOFINANCEDATA',
+        'schema': 'STOCK_DATA',
+    }
 
     print('[MAIN] : Connecting to Snowflake for SP500 data...')
     conn = snowflake.connector.connect(
-        user=SNOWFLAKE_CONN['user'],
-        password=SNOWFLAKE_CONN['password'],
-        account=SNOWFLAKE_CONN['account'],
-        warehouse=SNOWFLAKE_CONN['warehouse'],
-        database=SNOWFLAKE_CONN['database'],
-        schema=SNOWFLAKE_CONN['schema']
+        user=SP500_CONN['user'],
+        password=SP500_CONN['password'],
+        account=SP500_CONN['account'],
+        warehouse=SP500_CONN['warehouse'],
+        database=SP500_CONN['database'],
+        schema=SP500_CONN['schema']
     )
     print('[MAIN] : Connected to Snowflake for SP500 data.')
+    
+    symbols = get_sp500_components()
+    end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
 
     for symbol in symbols:
         print(f"[MAIN] : Processing {symbol}")
         table_name = f'ohlcv_data_{symbol}'.upper()
-        last_date = get_last_date(conn, table_name)
-        # data = download_sp500_data(symbol, last_date, end_date)
-        # if not data.empty:
-        #     success, nchunks, nrows = load_data_to_snowflake(conn, data, table_name)
-        #     print(f"[MAIN] : Data loaded for {symbol}: {success}, {nchunks} chunks, {nrows} rows")
-        # else:
-        #     print(f"[MAIN] : No new data for {symbol}")
+        last_date = get_last_date(conn, SP500_CONN['schema'], table_name)
+        data = download_sp500_data(symbol, last_date, end_date)
+        if not data.empty:
+            load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
+            print(f"[MAIN] : Data for {symbol} loaded to Snowflake.")
         
-        query = f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
+        query = f'SELECT * FROM "{SP500_CONN["schema"]}"."{table_name}"'
         df = pd.read_sql(query, conn)
-        
         df = calculate_all_indicators(df)
+        
         today_idx = df.index[-1]
         breakout_type, slope, intercept = isBreakOut(df, today_idx)
+        
         print(f"breakout type today for {symbol} is: {breakout_type}")
         
-        breakout_type = 1
-        slope = 0.24
-        intercept = 0.24
-        # Adding calculated values
-        df.loc[today_idx, 'Slope'] = slope
-        df.loc[today_idx, 'Intercept'] = intercept
-        df.loc[today_idx, 'Breakout_Type'] = breakout_type
         if breakout_type > 0:
             print("YEPP1")
             features = extract_and_flatten_features(df, today_idx)
-            print("YEPP1")
             if features.size == 0:
                 continue
             
             model_filename = f"{table_name}_model.pkl"
             
-            print('[MAIN] : Connecting to Snowflake for model data...')
             conn_models = snowflake.connector.connect(
-                user='AELHAJJAMI',
-                password='Abdou3012',
-                account='MOODBPJ-ATOS_AWS_EU_WEST_1',
-                warehouse='COMPUTE_WH',
-                database='YAHOOFINANCEDATA',
-                schema='STOCK_DATA'
+                user=YAHOO_CONN['user'],
+                password=YAHOO_CONN['password'],
+                account=YAHOO_CONN['account'],
+                warehouse=YAHOO_CONN['warehouse'],
+                database=YAHOO_CONN['database'],
+                schema=YAHOO_CONN['schema']
             )
             print('[MAIN] : Connected to Snowflake for model data.')
             
             with tempfile.TemporaryDirectory() as tmpdirname:
                 local_model_path = os.path.join(tmpdirname, model_filename)
-                
-                conn_models.cursor().execute(f"GET @INTERNAL_STAGE/{model_filename} file://{local_model_path}")
-                conn_models.close()
-                
+                conn_models.cursor().execute(f"GET @STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}")
                 model = joblib.load(local_model_path)
-                print("YEEP2")
-                scaler = StandardScaler()
-                features_scaled = scaler.fit_transform(features.reshape(1, -1))
-                prediction = model.predict(features_scaled)
-                if prediction[0] in ['VH', 'VB']:
-                    print("YEEP3")
-                    message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
-                    send_telegram_message(message)
-    
-    print('[MAIN] : Done processing all symbols.')
+            
+            print("YEEP2")
+            scaler = StandardScaler()
+            features_scaled = scaler.fit_transform(features.reshape(1, -1))
+            prediction = model.predict(features_scaled)
+            
+            if prediction[0] in ['VH', 'VB']:
+                print("YEEP3")
+                message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
+                send_telegram_message(message)
+        print("finish")
     conn.close()
 
+if __name__ == "__main__":
+    main()
