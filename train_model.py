@@ -3,7 +3,10 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import snowflake.connector
-from snowflake.connector.pandas_tools import write_pandas, read_stage_file
+from snowflake.connector.pandas_tools import write_pandas
+import requests
+from io import BytesIO
+import base64
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 import joblib
@@ -12,7 +15,7 @@ import requests
 import tempfile
 import gzip
 import shutil
-from io import BytesIO
+
 
 
 # Telegram bot configuration
@@ -289,9 +292,18 @@ def main():
             print('[MAIN] : Connected to Snowflake for model data.')
 
             # Lire le modèle du stage Snowflake directement en mémoire
-            stage_file = f"@YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename}"
-            data, _ = read_stage_file(stage_file, conn_models)
-            model = joblib.load(BytesIO(data))
+            model_stage_url = f"https://{YAHOO_CONN['account']}.snowflakecomputing.com/v1/data/{model_filename}"
+            headers = {
+                'Authorization': f'Bearer {conn_models.token}',
+                'Accept-Encoding': 'gzip'
+            }
+            response = requests.get(model_stage_url, headers=headers)
+            if response.status_code == 200:
+                compressed_model_data = BytesIO(response.content)
+                with gzip.open(compressed_model_data, 'rb') as f_in:
+                    model = joblib.load(f_in)
+            else:
+                raise Exception(f"Failed to download model {model_filename} from Snowflake stage")
             
             print("YEEP2")
             scaler = StandardScaler()
