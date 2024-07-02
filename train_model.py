@@ -287,12 +287,12 @@ if __name__ == '__main__':
 
     print('[MAIN] : Connecting to Snowflake for SP500 data...')
     conn = snowflake.connector.connect(
-        user=SP500_CONN['user'],
-        password=SP500_CONN['password'],
-        account=SP500_CONN['account'],
-        warehouse=SP500_CONN['warehouse'],
-        database=SP500_CONN['database'],
-        schema=SP500_CONN['schema']
+        user=SNOWFLAKE_CONN['user'],
+        password=SNOWFLAKE_CONN['password'],
+        account=SNOWFLAKE_CONN['account'],
+        warehouse=SNOWFLAKE_CONN['warehouse'],
+        database=SNOWFLAKE_CONN['database'],
+        schema=SNOWFLAKE_CONN['schema']
     )
     print('[MAIN] : Connected to Snowflake for SP500 data.')
 
