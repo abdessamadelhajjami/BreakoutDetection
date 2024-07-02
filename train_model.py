@@ -291,61 +291,30 @@ def main():
             )
             print('[MAIN] : Connected to Snowflake for model data.')
 
-            # Nom du fichier de modèle
-            model_filename = 'OHLCV_DATA_MMM_model.pkl'
+            stage_file_path = 'internal_stage/OHLCV_DATA_WBD_model.pkl/OHLCV_DATA_WBD_model.pkl.gz'
+            local_file_path = 'OHLCV_DATA_WBD_model.pkl.gz'
+            decompressed_file_path = 'OHLCV_DATA_WBD_model.pkl'
+
+
+           cs = conn_models.cursor()
+
+            # Exécuter la commande GET pour télécharger le fichier
+            cs.execute(f"GET @{stage_file_path} file://{local_file_path}")
             
-            # Créer un répertoire pour télécharger le modèle
-            local_model_dir = 'model_downloads'
-            if not os.path.exists(local_model_dir):
-                os.makedirs(local_model_dir)
+            # Étape 2 : Décompresser le fichier .gz
+            with gzip.open(local_file_path, 'rb') as f_in:
+                with open(decompressed_file_path, 'wb') as f_out:
+                    f_out.write(f_in.read())
             
-            # Chemin local pour enregistrer le modèle
-            local_model_path = os.path.join(local_model_dir, model_filename)
+            # Étape 3 : Charger le modèle en mémoire
+            with open(decompressed_file_path, 'rb') as f:
+                model = pickle.load(f)
             
-            # Vérification avant de télécharger
-            print(f"[DEBUG] Vérification du fichier avant téléchargement : {local_model_path}")
-            if os.path.exists(local_model_path):
-                print("[DEBUG] Le fichier existe déjà localement.")
-            else:
-                print("[DEBUG] Le fichier n'existe pas localement. Téléchargement en cours...")
+            # Utilisation du modèle
+            print("Modèle chargé avec succès :", model)
+
+
             
-            # Liste des fichiers dans le stage pour vérifier l'existence du fichier
-            list_command = "LIST @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE"
-            cursor = conn.cursor()
-            cursor.execute(list_command)
-            files = cursor.fetchall()
-            print("[DEBUG] Fichiers disponibles dans le stage :")
-            for file in files:
-                print(file)
-            
-            # Commande GET pour télécharger le modèle depuis le stage
-            get_command = f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_dir}/"
-            print(f"[DEBUG] Exécution de la commande : {get_command}")
-            try:
-                cursor.execute(get_command)
-                print("[DEBUG] Commande GET exécutée avec succès.")
-            except Exception as e:
-                print(f"[DEBUG] Erreur lors de l'exécution de la commande GET : {e}")
-            
-            # Vérification après téléchargement
-            print(f"[DEBUG] Vérification du fichier après téléchargement : {local_model_path}")
-            if os.path.exists(local_model_path):
-                print("[DEBUG] Le fichier a été téléchargé avec succès.")
-            else:
-                print("[DEBUG] Le fichier n'a pas été téléchargé.")
-            
-            # Charger le modèle avec joblib
-            if os.path.exists(local_model_path):
-                with open(local_model_path, 'rb') as f:
-                    model = joblib.load(f)
-            else:
-                raise FileNotFoundError(f"Le fichier modèle n'a pas été téléchargé et n'existe pas à l'emplacement attendu : {local_model_path}")
-            
-            # Fermer la connexion Snowflake
-            conn.close()
-            
-            # Vérifier que le modèle a été chargé
-            print("Model loaded:", model)
             print("YEEP2")
             scaler = StandardScaler()
             features_scaled = scaler.fit_transform(features.reshape(1, -1))
