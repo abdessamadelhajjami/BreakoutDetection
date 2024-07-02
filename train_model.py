@@ -291,7 +291,7 @@ def main():
                 compressed_model_path = os.path.join(tmpdirname, model_filename)
                 local_model_path = os.path.join(tmpdirname, model_filename.replace('.gz', ''))
                 
-                conn_models.cursor().execute(f"GET '@YAHOOFINANCEDATA."STOCK_DATA"."INTERNAL_STAGE"/{model_filename}' file://{compressed_model_path}")
+                conn_models.cursor().execute(f"GET '@YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename}' file://{compressed_model_path}")
                 
                 # Decompress the .gz file
                 with gzip.open(compressed_model_path, 'rb') as f_in:
