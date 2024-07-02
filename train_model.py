@@ -10,6 +10,9 @@ import joblib
 import os
 import requests
 import tempfile
+import gzip
+import shutil
+
 
 # Telegram bot configuration
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
@@ -211,6 +214,8 @@ def extract_and_flatten_features(df, candle):
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
 
+
+
 def main():
     SP500_CONN = {
         'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
@@ -259,19 +264,18 @@ def main():
         
         today_idx = df.index[-1]
         breakout_type, slope, intercept = isBreakOut(df, today_idx)
-        breakout_type = 1 
-        slope = 0.25 
-        intercept = 0.22
-        print(f"breakout type today for {symbol} is: {breakout_type}")
         
+        print(f"breakout type today for {symbol} is: {breakout_type}")
+        breakout_type = 1 
+        slope = 0.25
+        intercept = 0.23
         if breakout_type > 0:
             print("YEPP1")
             features = extract_and_flatten_features(df, today_idx)
-            print("YEPP1")
             if features.size == 0:
                 continue
             
-            model_filename = f"{table_name}_model.pkl"
+            model_filename = f"OHLCV_DATA_{symbol}_model.pkl.gz"
             
             conn_models = snowflake.connector.connect(
                 user=YAHOO_CONN['user'],
@@ -284,8 +288,16 @@ def main():
             print('[MAIN] : Connected to Snowflake for model data.')
             
             with tempfile.TemporaryDirectory() as tmpdirname:
-                local_model_path = os.path.join(tmpdirname, model_filename)
-                conn_models.cursor().execute(f"GET @STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}")
+                compressed_model_path = os.path.join(tmpdirname, model_filename)
+                local_model_path = os.path.join(tmpdirname, model_filename.replace('.gz', ''))
+                
+                conn_models.cursor().execute(f"GET '@"YAHOOFINANCEDATA"."STOCK_DATA"."INTERNAL_STAGE"/{model_filename}' file://{compressed_model_path}")
+                
+                # Decompress the .gz file
+                with gzip.open(compressed_model_path, 'rb') as f_in:
+                    with open(local_model_path, 'wb') as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                
                 model = joblib.load(local_model_path)
             
             print("YEEP2")
@@ -302,3 +314,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
