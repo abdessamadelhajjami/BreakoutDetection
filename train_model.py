@@ -287,19 +287,21 @@ def main():
             )
             print('[MAIN] : Connected to Snowflake for model data.')
 
-           # Télécharger le modèle du stage Snowflake
-            with tempfile.TemporaryDirectory() as temp_dir:
+           with tempfile.TemporaryDirectory() as temp_dir:
                 local_model_path = os.path.join(temp_dir, model_filename)
+                if not os.path.exists(temp_dir):
+                    os.makedirs(temp_dir)
                 get_command = f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}"
                 conn_models.cursor().execute(get_command)
             
                 # Extraire le fichier compressé (gzip)
                 with gzip.open(local_model_path, 'rb') as f_in:
-                    with open(local_model_path.replace('.gz', ''), 'wb') as f_out:
+                    decompressed_model_path = local_model_path.replace('.gz', '')
+                    with open(decompressed_model_path, 'wb') as f_out:
                         shutil.copyfileobj(f_in, f_out)
                 
                 # Charger le modèle avec joblib
-                model = joblib.load(local_model_path.replace('.gz', ''))
+                model = joblib.load(decompressed_model_path)
             
             print("YEEP2")
             scaler = StandardScaler()
