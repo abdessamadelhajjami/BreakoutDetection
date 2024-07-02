@@ -287,31 +287,32 @@ def main():
             )
             print('[MAIN] : Connected to Snowflake for model data.')
             
-            with tempfile.TemporaryDirectory() as tmpdirname:
-                compressed_model_path = os.path.join(tmpdirname, model_filename)
-                local_model_path = os.path.join(tmpdirname, model_filename.replace('.gz', ''))
-                
-                conn_models.cursor().execute(f"GET '@YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename}' file://{compressed_model_path}")
-                
-                # Decompress the .gz file
-                with gzip.open(compressed_model_path, 'rb') as f_in:
-                    with open(local_model_path, 'wb') as f_out:
-                        shutil.copyfileobj(f_in, f_out)
-                
-                model = joblib.load(local_model_path)
+            # Define paths for compressed and decompressed model files
+            compressed_model_path = f"/tmp/{model_filename}"
+            decompressed_model_path = compressed_model_path.replace('.gz', '')
+
+            # Fetch the compressed model file from Snowflake stage
+            conn_models.cursor().execute(f"GET @\"YAHOOFINANCEDATA\".\"STOCK_DATA\".\"INTERNAL_STAGE\"/{model_filename} file://{compressed_model_path}")
             
-            print("YEEP2")
+            # Decompress the model file
+            with gzip.open(compressed_model_path, 'rb') as f_in:
+                with open(decompressed_model_path, 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+            
+            # Load the model
+            model = joblib.load(decompressed_model_path)
+            print('[MAIN] : Model loaded successfully.')
+            
             scaler = StandardScaler()
             features_scaled = scaler.fit_transform(features.reshape(1, -1))
             prediction = model.predict(features_scaled)
-            
+
             if prediction[0] in ['VH', 'VB']:
-                print("YEEP3")
                 message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
                 send_telegram_message(message)
-        print("finish")
+
     conn.close()
+    conn_models.close()
 
 if __name__ == "__main__":
     main()
-
