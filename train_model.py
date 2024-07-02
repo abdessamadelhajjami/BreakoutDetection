@@ -292,12 +292,15 @@ def main():
             print('[MAIN] : Connected to Snowflake for model data.')
 
             with tempfile.TemporaryDirectory() as temp_dir:
-                local_model_path = os.path.join(temp_dir, model_filename)
-                get_command = f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}"
+                local_model_dir = temp_dir
+                get_command = f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_dir}"
                 conn_models.cursor().execute(get_command)
-                
+            
+                # Construire le chemin complet du fichier local téléchargé
+                local_model_path = os.path.join(local_model_dir, model_filename)
+            
                 # Charger le modèle avec joblib
-                with open(local_model_path, 'rb') as f_in:
+                with gzip.open(local_model_path, 'rb') as f_in:
                     model = joblib.load(f_in)
             
             print("YEEP2")
