@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import snowflake.connector
-from snowflake.connector.pandas_tools import write_pandas
+from snowflake.connector.pandas_tools import write_pandas, read_stage_file
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 import joblib
@@ -12,6 +12,7 @@ import requests
 import tempfile
 import gzip
 import shutil
+from io import BytesIO
 
 
 # Telegram bot configuration
@@ -287,21 +288,10 @@ def main():
             )
             print('[MAIN] : Connected to Snowflake for model data.')
 
-            with tempfile.TemporaryDirectory() as temp_dir :
-                local_model_path = os.path.join(temp_dir, model_filename)
-                if not os.path.exists(temp_dir):
-                    os.makedirs(temp_dir)
-                get_command = f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}"
-                conn_models.cursor().execute(get_command)
-            
-                # Extraire le fichier compressé (gzip)
-                with gzip.open(local_model_path, 'rb') as f_in:
-                    decompressed_model_path = local_model_path.replace('.gz', '')
-                    with open(decompressed_model_path, 'wb') as f_out:
-                        shutil.copyfileobj(f_in, f_out)
-                
-                # Charger le modèle avec joblib
-                model = joblib.load(decompressed_model_path)
+            # Lire le modèle du stage Snowflake directement en mémoire
+            stage_file = f"@YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename}"
+            data, _ = read_stage_file(stage_file, conn_models)
+            model = joblib.load(BytesIO(data))
             
             print("YEEP2")
             scaler = StandardScaler()
