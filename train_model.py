@@ -314,9 +314,14 @@ if __name__ == '__main__':
         today_idx = df.index[-1]
         breakout_type, slope, intercept = isBreakOut(df, today_idx)
         print(f"breakout type today for {symbol} is: {breakout_type}")
+        
         breakout_type = 1
         slope = 0.24
         intercept = 0.24
+        # Adding calculated values
+        df.loc[today_idx, 'Slope'] = slope
+        df.loc[today_idx, 'Intercept'] = intercept
+        df.loc[today_idx, 'Breakout_Type'] = breakout_type
         if breakout_type > 0:
             print("YEPP1")
             features = extract_and_flatten_features(df, today_idx)
