@@ -291,19 +291,14 @@ def main():
             )
             print('[MAIN] : Connected to Snowflake for model data.')
 
-            # Lire le modèle du stage Snowflake directement en mémoire
-            model_stage_url = f"https://{YAHOO_CONN['account']}.snowflakecomputing.com/v1/data/{model_filename}"
-            headers = {
-                'Authorization': f'Bearer {conn_models.token}',
-                'Accept-Encoding': 'gzip'
-            }
-            response = requests.get(model_stage_url, headers=headers)
-            if response.status_code == 200:
-                compressed_model_data = BytesIO(response.content)
-                with gzip.open(compressed_model_data, 'rb') as f_in:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                local_model_path = os.path.join(temp_dir, model_filename)
+                get_command = f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}"
+                conn_models.cursor().execute(get_command)
+                
+                # Charger le modèle avec joblib
+                with open(local_model_path, 'rb') as f_in:
                     model = joblib.load(f_in)
-            else:
-                raise Exception(f"Failed to download model {model_filename} from Snowflake stage")
             
             print("YEEP2")
             scaler = StandardScaler()
