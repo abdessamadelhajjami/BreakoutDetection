@@ -291,39 +291,27 @@ def main():
             )
             print('[MAIN] : Connected to Snowflake for model data.')
 
-            stage_file_path = 'internal_stage/OHLCV_DATA_WBD_model.pkl/OHLCV_DATA_WBD_model.pkl.gz'
-            local_file_path = 'OHLCV_DATA_WBD_model.pkl.gz'
-            decompressed_file_path = 'OHLCV_DATA_WBD_model.pkl'
+            # Télécharger le modèle du stage Snowflake
+            local_model_path = f"/tmp/{model_filename}"
+            get_command = f"GET @{YAHOO_CONN['database']}.{YAHOO_CONN['schema']}.INTERNAL_STAGE/{model_filename} file://{local_model_path}"
+            conn_models.cursor().execute(get_command)
+            conn_models.close()
 
-
-            cs = conn_models.cursor()
-
-            # Exécuter la commande GET pour télécharger le fichier
-            cs.execute(f"GET @{stage_file_path} file://{local_file_path}")
+            # Charger le modèle avec joblib
+            with gzip.open(local_model_path, 'rb') as f_in:
+                with open(local_model_path[:-3], 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
             
-            # Étape 2 : Décompresser le fichier .gz
-            with gzip.open(local_file_path, 'rb') as f_in:
-                with open(decompressed_file_path, 'wb') as f_out:
-                    f_out.write(f_in.read())
-            
-            # Étape 3 : Charger le modèle en mémoire
-            with open(decompressed_file_path, 'rb') as f:
-                model = pickle.load(f)
-            
-            # Utilisation du modèle
-            print("Modèle chargé avec succès :", model)
-
-
-            
-            print("YEEP2")
+            model = joblib.load(local_model_path[:-3])
+            print("Model loaded")
             scaler = StandardScaler()
             features_scaled = scaler.fit_transform(features.reshape(1, -1))
             prediction = model.predict(features_scaled)
             if prediction[0] in ['VH', 'VB']:
-                print("YEEP3")
+                print("True breakout detected")
                 message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
                 send_telegram_message(message)
-        print("finish")
+        print("Processing finished for", symbol)
     conn.close()
 
 if __name__ == "__main__":
