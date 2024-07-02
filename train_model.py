@@ -287,7 +287,7 @@ def main():
             )
             print('[MAIN] : Connected to Snowflake for model data.')
 
-           with tempfile.TemporaryDirectory() as temp_dir:
+            with tempfile.TemporaryDirectory() as temp_dir :
                 local_model_path = os.path.join(temp_dir, model_filename)
                 if not os.path.exists(temp_dir):
                     os.makedirs(temp_dir)
