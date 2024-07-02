@@ -296,17 +296,6 @@ if __name__ == '__main__':
     )
     print('[MAIN] : Connected to Snowflake for SP500 data.')
 
-    print('[MAIN] : Connecting to Snowflake for model data...')
-    conn_models = snowflake.connector.connect(
-        user=YAHOO_CONN['user'],
-        password=YAHOO_CONN['password'],
-        account=YAHOO_CONN['account'],
-        warehouse=YAHOO_CONN['warehouse'],
-        database=YAHOO_CONN['database'],
-        schema=YAHOO_CONN['schema']
-    )
-    print('[MAIN] : Connected to Snowflake for model data.')
-
     for symbol in symbols:
         print(f"[MAIN] : Processing {symbol}")
         table_name = f'ohlcv_data_{symbol}'.upper()
@@ -334,10 +323,22 @@ if __name__ == '__main__':
             
             model_filename = f"{table_name}_model.pkl"
             
+            print('[MAIN] : Connecting to Snowflake for model data...')
+            conn_models = snowflake.connector.connect(
+                user='AELHAJJAMI',
+                password='Abdou3012',
+                account='MOODBPJ-ATOS_AWS_EU_WEST_1',
+                warehouse='COMPUTE_WH',
+                database='YAHOOFINANCEDATA',
+                schema='STOCK_DATA'
+            )
+            print('[MAIN] : Connected to Snowflake for model data.')
+            
             with tempfile.TemporaryDirectory() as tmpdirname:
                 local_model_path = os.path.join(tmpdirname, model_filename)
                 
-                conn_models.cursor().execute(f"GET @STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}")
+                conn_models.cursor().execute(f"GET @INTERNAL_STAGE/{model_filename} file://{local_model_path}")
+                conn_models.close()
                 
                 model = joblib.load(local_model_path)
                 print("YEEP2")
@@ -351,5 +352,4 @@ if __name__ == '__main__':
     
     print('[MAIN] : Done processing all symbols.')
     conn.close()
-    conn_models.close()
 
