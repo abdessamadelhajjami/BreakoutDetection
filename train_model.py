@@ -287,7 +287,8 @@ def main():
             )
             print('[MAIN] : Connected to Snowflake for model data.')
             
-            local_model_path = f"/{model_filename}"
+            local_model_path = f"YAHOOFINANCEDATA/STOCK_DATA/INTERNAL_STAGE/{model_filename}"
+            
 
             # Fetch the model file from Snowflake stage
             conn_models.cursor().execute(f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}")
