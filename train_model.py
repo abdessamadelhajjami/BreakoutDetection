@@ -294,11 +294,16 @@ def main():
             # Nom du fichier de modèle
             model_filename = 'OHLCV_DATA_MMM_model.pkl'
             
+            # Créer un répertoire pour télécharger le modèle
+            local_model_dir = 'model_downloads'
+            if not os.path.exists(local_model_dir):
+                os.makedirs(local_model_dir)
+            
             # Chemin local pour enregistrer le modèle
-            local_model_path = model_filename
+            local_model_path = os.path.join(local_model_dir, model_filename)
             
             # Commande GET pour télécharger le modèle depuis le stage
-            get_command = f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}"
+            get_command = f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_dir}/"
             conn.cursor().execute(get_command)
             
             # Charger le modèle avec joblib
