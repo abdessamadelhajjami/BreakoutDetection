@@ -309,10 +309,23 @@ def main():
             else:
                 print("[DEBUG] Le fichier n'existe pas localement. Téléchargement en cours...")
             
+            # Liste des fichiers dans le stage pour vérifier l'existence du fichier
+            list_command = "LIST @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE"
+            cursor = conn.cursor()
+            cursor.execute(list_command)
+            files = cursor.fetchall()
+            print("[DEBUG] Fichiers disponibles dans le stage :")
+            for file in files:
+                print(file)
+            
             # Commande GET pour télécharger le modèle depuis le stage
             get_command = f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_dir}/"
             print(f"[DEBUG] Exécution de la commande : {get_command}")
-            conn.cursor().execute(get_command)
+            try:
+                cursor.execute(get_command)
+                print("[DEBUG] Commande GET exécutée avec succès.")
+            except Exception as e:
+                print(f"[DEBUG] Erreur lors de l'exécution de la commande GET : {e}")
             
             # Vérification après téléchargement
             print(f"[DEBUG] Vérification du fichier après téléchargement : {local_model_path}")
@@ -322,14 +335,14 @@ def main():
                 print("[DEBUG] Le fichier n'a pas été téléchargé.")
             
             # Charger le modèle avec joblib
-            with open(local_model_path, 'rb') as f:
-                model = joblib.load(f)
+            if os.path.exists(local_model_path):
+                with open(local_model_path, 'rb') as f:
+                    model = joblib.load(f)
+            else:
+                raise FileNotFoundError(f"Le fichier modèle n'a pas été téléchargé et n'existe pas à l'emplacement attendu : {local_model_path}")
             
             # Fermer la connexion Snowflake
             conn.close()
-            
-            # Vérifier que le modèle a été chargé
-            print("Model loaded:", model)
             
             # Vérifier que le modèle a été chargé
             print("Model loaded:", model)
