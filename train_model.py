@@ -302,9 +302,24 @@ def main():
             # Chemin local pour enregistrer le modèle
             local_model_path = os.path.join(local_model_dir, model_filename)
             
+            # Vérification avant de télécharger
+            print(f"[DEBUG] Vérification du fichier avant téléchargement : {local_model_path}")
+            if os.path.exists(local_model_path):
+                print("[DEBUG] Le fichier existe déjà localement.")
+            else:
+                print("[DEBUG] Le fichier n'existe pas localement. Téléchargement en cours...")
+            
             # Commande GET pour télécharger le modèle depuis le stage
             get_command = f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_dir}/"
+            print(f"[DEBUG] Exécution de la commande : {get_command}")
             conn.cursor().execute(get_command)
+            
+            # Vérification après téléchargement
+            print(f"[DEBUG] Vérification du fichier après téléchargement : {local_model_path}")
+            if os.path.exists(local_model_path):
+                print("[DEBUG] Le fichier a été téléchargé avec succès.")
+            else:
+                print("[DEBUG] Le fichier n'a pas été téléchargé.")
             
             # Charger le modèle avec joblib
             with open(local_model_path, 'rb') as f:
@@ -312,6 +327,9 @@ def main():
             
             # Fermer la connexion Snowflake
             conn.close()
+            
+            # Vérifier que le modèle a été chargé
+            print("Model loaded:", model)
             
             # Vérifier que le modèle a été chargé
             print("Model loaded:", model)
