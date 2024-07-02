@@ -286,27 +286,26 @@ def main():
                 schema=YAHOO_CONN['schema']
             )
             print('[MAIN] : Connected to Snowflake for model data.')
-            
-            local_model_path = f"YAHOOFINANCEDATA/STOCK_DATA/INTERNAL_STAGE/{model_filename}"
-            
 
-            # Fetch the model file from Snowflake stage
-            conn_models.cursor().execute(f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}")
-            
-            # Load the model
-            model = joblib.load(local_model_path)
-            print('[MAIN] : Model loaded successfully.')
-            
+            sql = f"SELECT GET_BINARY('{YAHOO_CONN['schema']}.INTERNAL_STAGE/{model_filename}')"
+            cur = conn_models.cursor()
+            cur.execute(sql)
+            model_binary = cur.fetchone()[0]
+
+            # Charger le modèle à partir du binaire
+            model = joblib.load(io.BytesIO(model_binary))
+            print("YEEP2")
             scaler = StandardScaler()
             features_scaled = scaler.fit_transform(features.reshape(1, -1))
             prediction = model.predict(features_scaled)
-
             if prediction[0] in ['VH', 'VB']:
+                print("YEEP3")
                 message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
                 send_telegram_message(message)
-
+            cur.close()
+        print("finish")
     conn.close()
-    conn_models.close()
 
 if __name__ == "__main__":
     main()
+            
