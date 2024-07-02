@@ -281,74 +281,75 @@ def read_data_from_snowflake(conn, table_name):
     cursor.close()
     return df
 
-def main():
-    conn = snowflake.connector.connect(
-        user=SNOWFLAKE_CONN['user'],
-        password=SNOWFLAKE_CONN['password'],
-        account=SNOWFLAKE_CONN['account'],
-        warehouse=SNOWFLAKE_CONN['warehouse'],
-        database=SNOWFLAKE_CONN['database'],
-        schema=SNOWFLAKE_CONN['schema']
-    )
-    
+if __name__ == '__main__':
     symbols = get_sp500_components()
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
 
+    print('[MAIN] : Connecting to Snowflake for SP500 data...')
+    conn = snowflake.connector.connect(
+        user=SP500_CONN['user'],
+        password=SP500_CONN['password'],
+        account=SP500_CONN['account'],
+        warehouse=SP500_CONN['warehouse'],
+        database=SP500_CONN['database'],
+        schema=SP500_CONN['schema']
+    )
+    print('[MAIN] : Connected to Snowflake for SP500 data.')
+
+    print('[MAIN] : Connecting to Snowflake for model data...')
+    conn_models = snowflake.connector.connect(
+        user=YAHOO_CONN['user'],
+        password=YAHOO_CONN['password'],
+        account=YAHOO_CONN['account'],
+        warehouse=YAHOO_CONN['warehouse'],
+        database=YAHOO_CONN['database'],
+        schema=YAHOO_CONN['schema']
+    )
+    print('[MAIN] : Connected to Snowflake for model data.')
+
     for symbol in symbols:
-        print(f"Processing {symbol}")
+        print(f"[MAIN] : Processing {symbol}")
         table_name = f'ohlcv_data_{symbol}'.upper()
         last_date = get_last_date(conn, table_name)
         # data = download_sp500_data(symbol, last_date, end_date)
         # if not data.empty:
         #     success, nchunks, nrows = load_data_to_snowflake(conn, data, table_name)
-        #     print(f"Data loaded: {success}, {nchunks} chunks, {nrows} rows")
+        #     print(f"[MAIN] : Data loaded for {symbol}: {success}, {nchunks} chunks, {nrows} rows")
         # else:
-        #     print(f"No new data for {symbol}")
-
-        # Vérifier les breakouts pour aujourd'hui
-        df = read_data_from_snowflake(conn, table_name)
-        if df.empty:
-            print("base de donnée empy")
-            continue
-
+        #     print(f"[MAIN] : No new data for {symbol}")
+        
+        query = f'SELECT * FROM "{SP500_CONN["schema"]}"."{table_name}"'
+        df = pd.read_sql(query, conn)
+        
         df = calculate_all_indicators(df)
         today_idx = df.index[-1]
         breakout_type, slope, intercept = isBreakOut(df, today_idx)
-        df['Breakout Type'], df['Slope'], df['Intercept'] = zip(*[isBreakOut(df, i) for i in range(len(df))])
-
-        breakout_type = 1
-        print("breakout type today is :", breakout_type)
-        breakout_type = 1
-        slope = 1.23
-        intercept= 0.25
+        print(f"breakout type today for {symbol} is: {breakout_type}")
+        
         if breakout_type > 0:
             print("YEPP1")
             features = extract_and_flatten_features(df, today_idx)
             if features.size == 0:
                 continue
-
+            
             model_filename = f"{table_name}_model.pkl"
-
-            # Create a temporary directory
+            
             with tempfile.TemporaryDirectory() as tmpdirname:
                 local_model_path = os.path.join(tmpdirname, model_filename)
                 
-                conn.cursor().execute(f"USE DATABASE YAHOOFINANCEDATA")
-                conn.cursor().execute(f"GET @STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}")
-            
+                conn_models.cursor().execute(f"GET @STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}")
+                
                 model = joblib.load(local_model_path)
                 print("YEEP2")
                 scaler = StandardScaler()
                 features_scaled = scaler.fit_transform(features.reshape(1, -1))
                 prediction = model.predict(features_scaled)
-                
                 if prediction[0] in ['VH', 'VB']:
                     print("YEEP3")
                     message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
                     send_telegram_message(message)
-        print("finish")
-
+    
+    print('[MAIN] : Done processing all symbols.')
     conn.close()
+    conn_models.close()
 
-if __name__ == "__main__":
-    main()
