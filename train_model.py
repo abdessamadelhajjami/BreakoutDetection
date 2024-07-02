@@ -296,7 +296,7 @@ def main():
             decompressed_file_path = 'OHLCV_DATA_WBD_model.pkl'
 
 
-           cs = conn_models.cursor()
+            cs = conn_models.cursor()
 
             # Exécuter la commande GET pour télécharger le fichier
             cs.execute(f"GET @{stage_file_path} file://{local_file_path}")
