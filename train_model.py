@@ -307,7 +307,7 @@ if __name__ == '__main__':
         # else:
         #     print(f"[MAIN] : No new data for {symbol}")
         
-        query = f'SELECT * FROM "{SP500_CONN["schema"]}"."{table_name}"'
+        query = f'SELECT * FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
         df = pd.read_sql(query, conn)
         
         df = calculate_all_indicators(df)
