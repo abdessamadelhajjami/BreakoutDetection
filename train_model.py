@@ -287,20 +287,13 @@ def main():
             )
             print('[MAIN] : Connected to Snowflake for model data.')
             
-            # Define paths for compressed and decompressed model files
-            compressed_model_path = f"/tmp/{model_filename}"
-            decompressed_model_path = compressed_model_path.replace('.gz', '')
+            local_model_path = f"/tmp/{model_filename}"
 
-            # Fetch the compressed model file from Snowflake stage
-            conn_models.cursor().execute(f"GET @\"YAHOOFINANCEDATA\".\"STOCK_DATA\".\"INTERNAL_STAGE\"/{model_filename} file://{compressed_model_path}")
-            
-            # Decompress the model file
-            with gzip.open(compressed_model_path, 'rb') as f_in:
-                with open(decompressed_model_path, 'wb') as f_out:
-                    shutil.copyfileobj(f_in, f_out)
+            # Fetch the model file from Snowflake stage
+            conn_models.cursor().execute(f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}")
             
             # Load the model
-            model = joblib.load(decompressed_model_path)
+            model = joblib.load(local_model_path)
             print('[MAIN] : Model loaded successfully.')
             
             scaler = StandardScaler()
