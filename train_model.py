@@ -298,7 +298,7 @@ def main():
             local_model_path = model_filename
             
             # Commande GET pour télécharger le modèle depuis le stage
-            get_command = f"GET @INTERNAL_STAGE/{model_filename} file://{local_model_path}"
+            get_command = f"GET @YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE/{model_filename} file://{local_model_path}"
             conn.cursor().execute(get_command)
             
             # Charger le modèle avec joblib
@@ -310,7 +310,6 @@ def main():
             
             # Vérifier que le modèle a été chargé
             print("Model loaded:", model)
-            
             print("YEEP2")
             scaler = StandardScaler()
             features_scaled = scaler.fit_transform(features.reshape(1, -1))
