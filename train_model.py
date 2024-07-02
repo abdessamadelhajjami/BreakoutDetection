@@ -15,6 +15,8 @@ import requests
 import tempfile
 import gzip
 import shutil
+import subprocess
+
 
 
 
@@ -219,6 +221,20 @@ def extract_and_flatten_features(df, candle):
     return np.array(flattened_features)
 
 
+import subprocess
+
+def download_model_from_snowflake(account, user, stage, model_file, local_dir):
+    # Construire la commande SnowSQL GET
+    get_command = f'snowsql -a {account} -u {user} -q "GET @{stage}/{model_file} file://{local_dir}"'
+
+    # Exécuter la commande GET
+    subprocess.run(get_command, shell=True, check=True)
+
+def load_model(file_path):
+    import joblib
+    with open(file_path, 'rb') as f:
+        model = joblib.load(f)
+    return model
 
 def main():
     SP500_CONN = {
@@ -280,39 +296,30 @@ def main():
                 continue
             
             model_filename = f"OHLCV_DATA_{symbol}_model.pkl.gz"
-            
-            conn_models = snowflake.connector.connect(
-                user=YAHOO_CONN['user'],
-                password=YAHOO_CONN['password'],
-                account=YAHOO_CONN['account'],
-                warehouse=YAHOO_CONN['warehouse'],
-                database=YAHOO_CONN['database'],
-                schema=YAHOO_CONN['schema']
-            )
-            print('[MAIN] : Connected to Snowflake for model data.')
+            local_model_path = f"./{model_filename}"
 
             # Télécharger le modèle du stage Snowflake
-            local_model_path = f"/tmp/{model_filename}"
-            get_command = f"GET @{YAHOO_CONN['database']}.{YAHOO_CONN['schema']}.INTERNAL_STAGE/{model_filename} file://{local_model_path}"
-            conn_models.cursor().execute(get_command)
-            conn_models.close()
+            download_model_from_snowflake(
+                YAHOO_CONN['account'], 
+                YAHOO_CONN['user'], 
+                "YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE", 
+                model_filename, 
+                local_model_path
+            )
 
             # Charger le modèle avec joblib
-            with gzip.open(local_model_path, 'rb') as f_in:
-                with open(local_model_path[:-3], 'wb') as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-            
-            model = joblib.load(local_model_path[:-3])
-            print("Model loaded")
+            model = load_model(local_model_path)
+            print("YEEP2")
             scaler = StandardScaler()
             features_scaled = scaler.fit_transform(features.reshape(1, -1))
             prediction = model.predict(features_scaled)
             if prediction[0] in ['VH', 'VB']:
-                print("True breakout detected")
+                print("YEEP3")
                 message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
                 send_telegram_message(message)
-        print("Processing finished for", symbol)
+        print("finish")
     conn.close()
 
 if __name__ == "__main__":
     main()
+
