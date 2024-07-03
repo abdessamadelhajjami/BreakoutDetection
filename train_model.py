@@ -239,7 +239,6 @@ def load_model(file_path):
 
 
 
-
 def main():
     SP500_CONN = {
         'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
@@ -270,7 +269,6 @@ def main():
     today_idx = df.index[-1]
     breakout_type, slope, intercept = isBreakOut(df, today_idx)
 
-    # Add Slope, Intercept, and Breakout_Type to DataFrame
     df.loc[today_idx, 'Slope'] = slope
     df.loc[today_idx, 'Intercept'] = intercept
     df.loc[today_idx, 'Breakout_Type'] = breakout_type
@@ -285,11 +283,14 @@ def main():
         if features.size == 0:
             return
 
-        # model_filename = ""
-        # local_model_path = os.path.join(os.getcwd(), model_filename)
-
+        model_filename = "OHLCV_DATA_TTWO_model.pkl"
+        local_model_path = os.path.join(os.getcwd(), model_filename)
         
-        model = joblib.load('OHLCV_DATA_TTWO_model.pkl')
+        model = load_model()  # Utilisez la fonction load_model définie précédemment
+        if model is None:
+            print("Failed to load the model.")
+            return
+
         print("YEEP2")
         scaler = StandardScaler()
         features_scaled = scaler.fit_transform(features.reshape(1, -1))
