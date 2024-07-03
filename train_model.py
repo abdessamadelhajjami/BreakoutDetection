@@ -275,7 +275,7 @@ def main():
     df.loc[today_idx, 'Breakout_Type'] = breakout_type
     
     print(f"Breakout type today for {symbol} is: {breakout_type}")
-    
+    breakout_type=1
     if breakout_type > 0:
         print("YEPP1")
         features = extract_and_flatten_features(df, today_idx)
