@@ -291,7 +291,10 @@ def main():
         # Charger le modèle avec joblib
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            model = joblib.load(local_model_path)
+            with gzip.open(local_model_path, 'rb') as f_in:
+                with open('model.pkl', 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+            model = joblib.load('model.pkl')
         print("YEEP2")
         scaler = StandardScaler()
         features_scaled = scaler.fit_transform(features.reshape(1, -1))
@@ -307,5 +310,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
