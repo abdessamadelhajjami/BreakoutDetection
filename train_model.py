@@ -246,15 +246,6 @@ def main():
         'schema': 'SP500',
     }
 
-    YAHOO_CONN = {
-        'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
-        'user': 'AELHAJJAMI',
-        'password': 'Abdou3012',
-        'warehouse': 'COMPUTE_WH',
-        'database': 'YAHOOFINANCEDATA',
-        'schema': 'STOCK_DATA',
-    }
-
     print('[MAIN] : Connecting to Snowflake for SP500 data...')
     conn = snowflake.connector.connect(
         user=SP500_CONN['user'],
@@ -265,61 +256,46 @@ def main():
         schema=SP500_CONN['schema']
     )
     print('[MAIN] : Connected to Snowflake for SP500 data.')
+
+    symbol = 'TTWO'
+    table_name = f'ohlcv_data_{symbol}'.upper()
+    query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
+    df = pd.read_sql(query, conn)
+
+    df = calculate_all_indicators(df)
+    today_idx = df.index[-1]
+    breakout_type, slope, intercept = isBreakOut(df, today_idx)
+
+    # Add Slope, Intercept, and Breakout_Type to DataFrame
+    df.loc[today_idx, 'Slope'] = slope
+    df.loc[today_idx, 'Intercept'] = intercept
+    df.loc[today_idx, 'Breakout_Type'] = breakout_type
     
-    symbols = get_sp500_components()
-    end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
+    print(f"breakout type today for {symbol} is: {breakout_type}")
+    breakout_type = 1 
+    slope = 0.25
+    intercept = 0.14
+    if breakout_type > 0:
+        print("YEPP1")
+        features = extract_and_flatten_features(df, today_idx)
+        if features.size == 0:
+            return
 
-    for symbol in symbols:
-        print(f"[MAIN] : Processing {symbol}")
-        table_name = f'ohlcv_data_{symbol}'.upper()
-        last_date = get_last_date(conn, SP500_CONN['schema'], table_name)
-        data = download_sp500_data(symbol, last_date, end_date)
-        if not data.empty:
-            load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
-            print(f"[MAIN] : Data for {symbol} loaded to Snowflake.")
-        
-        query = f'SELECT * FROM "{SP500_CONN["schema"]}"."{table_name}"'
-        df = pd.read_sql(query, conn)
-        df = calculate_all_indicators(df)
-        
-        today_idx = df.index[-1]
-        breakout_type, slope, intercept = isBreakOut(df, today_idx)
-        
-        print(f"breakout type today for {symbol} is: {breakout_type}")
-        breakout_type = 1 
-        slope = 0.25
-        intercept = 0.23
-        if breakout_type > 0:
-            print("YEPP1")
-            features = extract_and_flatten_features(df, today_idx)
-            if features.size == 0:
-                continue
-            
-            model_filename = f"OHLCV_DATA_{symbol}_model.pkl.gz"
-            local_model_path = f"./{model_filename}"
+        model_filename = "OHLCV_DATA_TTWO_model.pkl.gz"
+        local_model_path = f"{model_filename}"
 
-            # Télécharger le modèle du stage Snowflake
-            download_model_from_snowflake(
-                YAHOO_CONN['account'], 
-                YAHOO_CONN['user'], 
-                "YAHOOFINANCEDATA.STOCK_DATA.INTERNAL_STAGE", 
-                model_filename, 
-                local_model_path
-            )
-
-            # Charger le modèle avec joblib
-            model = load_model(local_model_path)
-            print("YEEP2")
-            scaler = StandardScaler()
-            features_scaled = scaler.fit_transform(features.reshape(1, -1))
-            prediction = model.predict(features_scaled)
-            if prediction[0] in ['VH', 'VB']:
-                print("YEEP3")
-                message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
-                send_telegram_message(message)
-        print("finish")
+        # Charger le modèle avec joblib
+        model = joblib.load(local_model_path)
+        print("YEEP2")
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features.reshape(1, -1))
+        prediction = model.predict(features_scaled)
+        if prediction[0] in ['VH', 'VB']:
+            print("YEEP3")
+            message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
+            send_telegram_message(message)
+    print("finish")
     conn.close()
 
 if __name__ == "__main__":
     main()
-
