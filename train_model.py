@@ -231,13 +231,15 @@ def download_model_from_snowflake(account, user, stage, model_file, local_dir):
     # Exécuter la commande GET
     subprocess.run(get_command, shell=True, check=True)
 
-def load_model(file_path):
-    import joblib
-    with open(file_path, 'rb') as f:
-        model = joblib.load(f)
-    return model
-
-
+def load_model():
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=UserWarning)
+            model = joblib.load('OHLCV_DATA_TTWO_model.pkl')
+        return model
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        return None
 
 def main():
     SP500_CONN = {
