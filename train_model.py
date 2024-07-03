@@ -284,8 +284,8 @@ def main():
     
     print(f"breakout type today for {symbol} is: {breakout_type}")
     breakpout_type = 1 
-    slope = 0.2
-    intercept = 0.11
+    slope = -0.2
+    intercept = -0.11
     if breakout_type > 0:
         print("YEPP1")
         features = extract_and_flatten_features(df, today_idx)
@@ -303,6 +303,7 @@ def main():
         scaler = StandardScaler()
         features_scaled = scaler.fit_transform(features.reshape(1, -1))
         prediction = model.predict(features_scaled)
+        prediction = 'VB'
         if prediction[0] in ['VH', 'VB']:
             print("YEEP3")
             message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
