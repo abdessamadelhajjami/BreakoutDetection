@@ -276,7 +276,7 @@ def main():
     df.loc[today_idx, 'Breakout_Type'] = breakout_type
     
     print(f"Breakout type today for {symbol} is: {breakout_type}")
-    breakpout_type = 1 
+    breakout_type = 1 
     slope = -0.2
     intercept = -0.11
     if breakout_type > 0:
