@@ -246,7 +246,6 @@ import joblib
 import os
 from sklearn.preprocessing import StandardScaler
 import warnings
-from sklearn.exceptions import InconsistentVersionWarning
 
 def main():
     SP500_CONN = {
@@ -298,7 +297,7 @@ def main():
 
         # Charger le modèle avec joblib
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=InconsistentVersionWarning)
+            warnings.simplefilter("ignore")
             model = joblib.load(local_model_path)
         print("YEEP2")
         scaler = StandardScaler()
@@ -313,3 +312,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
