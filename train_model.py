@@ -285,16 +285,11 @@ def main():
         if features.size == 0:
             return
 
-        model_filename = "OHLCV_DATA_TTWO_model.pkl"
-        local_model_path = os.path.join(os.getcwd(), model_filename)
+        # model_filename = ""
+        # local_model_path = os.path.join(os.getcwd(), model_filename)
 
-        # Charger le modèle avec joblib
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            with gzip.open(local_model_path, 'rb') as f_in:
-                with open('model.pkl', 'wb') as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-            model = joblib.load('model.pkl')
+        
+        model = joblib.load('OHLCV_DATA_TTWO_model.pkl')
         print("YEEP2")
         scaler = StandardScaler()
         features_scaled = scaler.fit_transform(features.reshape(1, -1))
