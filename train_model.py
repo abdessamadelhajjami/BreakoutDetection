@@ -276,9 +276,9 @@ def main():
     df.loc[today_idx, 'Breakout_Type'] = breakout_type
     
     print(f"Breakout type today for {symbol} is: {breakout_type}")
-    breakout_type = 1 
-    slope = -0.2
-    intercept = -0.11
+    breakout_type = 1  # Pour test
+    slope = -0.2  # Pour test
+    intercept = -0.11  # Pour test
     if breakout_type > 0:
         print("YEPP1")
         features = extract_and_flatten_features(df, today_idx)
@@ -286,13 +286,12 @@ def main():
             return
 
         model_filename = "OHLCV_DATA_TTWO_model.pkl.gz"
-        local_model_path = f"{model_filename}"
+        local_model_path = os.path.join(os.getcwd(), model_filename)
 
         # Charger le modèle avec joblib
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             model = joblib.load(local_model_path)
-
         print("YEEP2")
         scaler = StandardScaler()
         features_scaled = scaler.fit_transform(features.reshape(1, -1))
@@ -308,4 +307,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
