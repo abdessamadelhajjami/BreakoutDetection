@@ -239,15 +239,16 @@ def load_model(file_path):
 
 
 
-    
-import snowflake.connector
-import pandas as pd
-import joblib
-import os
-from sklearn.preprocessing import StandardScaler
-import warnings
-
 def main():
+    SP500_CONN = {
+        'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
+        'user': 'AELHAJJAMI',
+        'password': 'Abdou3012',
+        'warehouse': 'COMPUTE_WH',
+        'database': 'BREAKOUDETECTIONDB',
+        'schema': 'SP500',
+    }
+
     print('[MAIN] : Connecting to Snowflake for SP500 data...')
     conn = snowflake.connector.connect(
         user=SP500_CONN['user'],
@@ -264,20 +265,17 @@ def main():
     query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
     df = pd.read_sql(query, conn)
 
-    # Calcul des indicateurs et détection de breakout
     df = calculate_all_indicators(df)
     today_idx = df.index[-1]
     breakout_type, slope, intercept = isBreakOut(df, today_idx)
 
-    # Ajouter les colonnes Slope, Intercept et Breakout_Type
+    # Add Slope, Intercept, and Breakout_Type to DataFrame
     df.loc[today_idx, 'Slope'] = slope
     df.loc[today_idx, 'Intercept'] = intercept
     df.loc[today_idx, 'Breakout_Type'] = breakout_type
-
+    
     print(f"Breakout type today for {symbol} is: {breakout_type}")
-    breakout_type= 1 
-    slope =0.0012
-    intercept = 0.12
+    
     if breakout_type > 0:
         print("YEPP1")
         features = extract_and_flatten_features(df, today_idx)
@@ -296,12 +294,12 @@ def main():
         scaler = StandardScaler()
         features_scaled = scaler.fit_transform(features.reshape(1, -1))
         prediction = model.predict(features_scaled)
-
+        prediction = ['VB']  # Pour le test, on force la prédiction à 'VB'
+        
         if prediction[0] in ['VH', 'VB']:
             print("YEEP3")
             message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
             send_telegram_message(message)
-    
     print("finish")
     conn.close()
 
