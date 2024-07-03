@@ -236,6 +236,10 @@ def load_model(file_path):
         model = joblib.load(f)
     return model
 
+
+
+
+    
 import snowflake.connector
 import pandas as pd
 import joblib
