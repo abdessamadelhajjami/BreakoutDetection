@@ -236,6 +236,14 @@ def load_model(file_path):
         model = joblib.load(f)
     return model
 
+import snowflake.connector
+import pandas as pd
+import joblib
+import os
+from sklearn.preprocessing import StandardScaler
+import warnings
+from sklearn.exceptions import InconsistentVersionWarning
+
 def main():
     SP500_CONN = {
         'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
@@ -272,9 +280,9 @@ def main():
     df.loc[today_idx, 'Breakout_Type'] = breakout_type
     
     print(f"breakout type today for {symbol} is: {breakout_type}")
-    breakout_type = 1 
-    slope = 0.25
-    intercept = 0.14
+    breakpout_type = 1 
+    slope = 0.2
+    intercept = 0.11
     if breakout_type > 0:
         print("YEPP1")
         features = extract_and_flatten_features(df, today_idx)
@@ -285,7 +293,9 @@ def main():
         local_model_path = f"{model_filename}"
 
         # Charger le modèle avec joblib
-        model = joblib.load(local_model_path)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=InconsistentVersionWarning)
+            model = joblib.load(local_model_path)
         print("YEEP2")
         scaler = StandardScaler()
         features_scaled = scaler.fit_transform(features.reshape(1, -1))
