@@ -241,6 +241,8 @@ def load_model():
         print(f"Error loading model: {e}")
         return None
 
+
+
 def main():
     SP500_CONN = {
         'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
@@ -265,7 +267,12 @@ def main():
     symbol = 'TTWO'
     table_name = f'ohlcv_data_{symbol}'.upper()
     query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
-    df = pd.read_sql(query, conn)
+    
+    try:
+        df = pd.read_sql(query, conn)
+    except Exception as e:
+        print(f"Error reading data from Snowflake: {e}")
+        return
 
     df = calculate_all_indicators(df)
     today_idx = df.index[-1]
@@ -279,20 +286,24 @@ def main():
     breakout_type = 1  # Pour test
     slope = -0.2  # Pour test
     intercept = -0.11  # Pour test
+    
     if breakout_type > 0:
         print("YEPP1")
         features = extract_and_flatten_features(df, today_idx)
         if features.size == 0:
+            print("Features extraction failed.")
             return
 
         model_filename = "OHLCV_DATA_TTWO_model.pkl"
-        local_model_path = os.path.join(os.getcwd(), model_filename)
         
-        model = load_model()  # Utilisez la fonction load_model définie précédemment
-        if model is None:
-            print("Failed to load the model.")
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=UserWarning)
+                model = joblib.load(model_filename)
+        except Exception as e:
+            print(f"Error loading model: {e}")
             return
-
+        
         print("YEEP2")
         scaler = StandardScaler()
         features_scaled = scaler.fit_transform(features.reshape(1, -1))
