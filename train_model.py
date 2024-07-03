@@ -285,7 +285,7 @@ def main():
         if features.size == 0:
             return
 
-        model_filename = "OHLCV_DATA_TTWO_model.pkl.gz"
+        model_filename = "OHLCV_DATA_TTWO_model.pkl"
         local_model_path = os.path.join(os.getcwd(), model_filename)
 
         # Charger le modèle avec joblib
