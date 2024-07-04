@@ -3,65 +3,63 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import snowflake.connector
-from snowflake.snowpark import Session
 from snowflake.connector.pandas_tools import write_pandas
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.impute import SimpleImputer
-
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, accuracy_score
 from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
 import joblib
-import requests
 import os
+import warnings
 
-
-# Telegram bot configuration
+# Fonction pour envoyer un message sur Telegram
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
-TELEGRAM_CHAT_ID = "https://t.me/Breakout_Channel" 
+TELEGRAM_CHAT_ID = "-1002197712630"
 
-# Snowflake connection configuration
-SNOWFLAKE_CONN = {
-    'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
-        'user': 'AELHAJJAMI',
-        'password': 'Abdou3012',
-        'warehouse': 'COMPUTE_WH',
-        'database': 'BREAKOUDETECTIONDB',
-        'schema': 'SP500',
-}
+def send_telegram_message(message):
+    response = requests.post(
+        TELEGRAM_API_URL,
+        json={"chat_id": TELEGRAM_CHAT_ID, "text": message}
+    )
+    print(f"Telegram response: {response.json()}")
 
-
-# Function to get SP500 components
-def get_sp500_components():
-    df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
-    return df["Symbol"].tolist()
-
-# Download SP500 data
+# Fonction pour télécharger les données OHLCV de Yahoo Finance
 def download_sp500_data(symbol, start, end):
     data = yf.download(symbol, start=start, end=end)
+    data.reset_index(inplace=True)
     return data
 
-# Load data into Snowflake
-def load_data_to_snowflake(data, table_name):
-    conn = snowflake.connector.connect(
-        user=SNOWFLAKE_CONN['user'],
-        password=SNOWFLAKE_CONN['password'],
-        account=SNOWFLAKE_CONN['account'],
-        warehouse=SNOWFLAKE_CONN['warehouse'],
-        database=SNOWFLAKE_CONN['database'],
-        schema=SNOWFLAKE_CONN['schema']
-    )
-    df = data.reset_index()
-    df.columns = [col.replace(' ', '_') for col in df.columns]
-    df['Date'] = df['Date'].astype(str)
-    create_table_if_not_exists(conn, table_name)
-    write_pandas(conn, df, table_name)
-    conn.close()
+# Fonction pour vérifier l'existence d'une table dans Snowflake
+def table_exists(conn, schema, table_name):
+    query = f"""
+    SELECT COUNT(*)
+    FROM information_schema.tables 
+    WHERE table_schema = '{schema}'
+    AND table_name = '{table_name.upper()}';
+    """
+    result = conn.cursor().execute(query).fetchone()[0]
+    return result > 0
 
-def create_table_if_not_exists(conn, table_name):
+# Fonction pour obtenir la dernière date de données dans Snowflake
+def get_last_date(conn, schema, table_name):
+    if not table_exists(conn, schema, table_name):
+        return '2010-01-01'
+    
+    query = f'SELECT MAX("Date") FROM "{schema}"."{table_name}"'
+    cursor = conn.cursor()
+    cursor.execute(query)
+    last_date = cursor.fetchone()[0]
+    cursor.close()
+    
+    if last_date is None:
+        return '2010-01-01'
+    else:
+        return (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+
+# Fonction pour créer une table dans Snowflake si elle n'existe pas
+def create_table_if_not_exists(conn, schema, table_name):
     cursor = conn.cursor()
     cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS "{SNOWFLAKE_CONN['schema']}"."{table_name}" (
+        CREATE TABLE IF NOT EXISTS "{schema}"."{table_name.upper()}" (
             "Date" DATE, 
             "Open" FLOAT, 
             "High" FLOAT, 
@@ -73,37 +71,19 @@ def create_table_if_not_exists(conn, table_name):
     """)
     cursor.close()
 
-# Check if table exists
-def table_exists(conn, table_name):
-    query = f"""
-    SELECT COUNT(*)
-    FROM information_schema.tables 
-    WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'
-    AND table_name = '{table_name.upper()}';
-    """
-    cursor = conn.cursor()
-    cursor.execute(query)
-    result = cursor.fetchone()[0]
-    cursor.close()
-    return result > 0
-
-# Get the last date from the table
-def get_last_date(conn, table_name):
-    if not table_exists(conn, table_name):
-        return '2010-01-01'
+# Fonction pour charger les données dans Snowflake
+def load_data_to_snowflake(conn, df, schema, table_name):
+    create_table_if_not_exists(conn, schema, table_name)
     
-    query = f'SELECT MAX("Date") FROM "{SNOWFLAKE_CONN["schema"]}"."{table_name}"'
-    cursor = conn.cursor()
-    cursor.execute(query)
-    last_date = cursor.fetchone()[0]
-    cursor.close()
+    # Réinitialiser l'index correctement
+    df.reset_index(drop=True, inplace=True)
+    df.columns = [col.replace(' ', '_') for col in df.columns]
+    df['Date'] = df['Date'].astype(str)
     
-    if last_date is None:
-        return '2010-01-01'
-    else:
-        return (pd.to_datetime(last_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+    success, nchunks, nrows, _ = write_pandas(conn, df, table_name.upper())
+    return success, nchunks, nrows
 
-# Calculate pivot reversals
+# Calcul des points pivots
 def calculate_pivot_reversals(df, window=3):
     pivot_series = pd.Series([0]*len(df), index=df.index)
     for candle in range(window, len(df) - window):
@@ -122,19 +102,19 @@ def calculate_pivot_reversals(df, window=3):
             pivot_series[candle] = 1
     return pivot_series
 
-# Collect channel information
+# Collecte des données de canaux
 def collect_channel(df, candle, backcandles, window=1):
     localdf = df[candle-backcandles-window:candle-window]
-    highs, idxhighs = localdf[localdf['SAR_Reversals'] == 1].High.values, localdf[localdf['SAR_Reversals'] == 1].High.index
-    lows, idxlows = localdf[localdf['SAR_Reversals'] == 2].Low.values, localdf[localdf['SAR_Reversals'] == 2].Low.index
+    highs, idxhighs = localdf[localdf['SAR Reversals'] == 1].High.values, localdf[localdf['SAR Reversals'] == 1].High.index
+    lows, idxlows = localdf[localdf['SAR Reversals'] == 2].Low.values, localdf[localdf['SAR Reversals'] == 2].Low.index
     if len(lows) >= 2 and len(highs) >= 2:
-        sl_lows, interc_lows, _, _, _ = stats.linregress(idxlows, lows)
-        sl_highs, interc_highs, _, _, _ = stats.linregress(idxhighs, highs)
+        sl_lows, interc_lows, sl_highs, interc_highs, _, _ = stats.linregress(idxhighs, highs)
+        sl_highs, interc_highs, _, _, _ = stats.linregress(idxlows, lows)
         return sl_lows, interc_lows, sl_highs, interc_highs, 0, 0
     else:
         return 0, 0, 0, 0, 0, 0
 
-# Check if the line crosses candles
+# Vérification de la croisement de la ligne
 def line_crosses_candles(data, slope, intercept, start_index, end_index):
     body_crosses = 0
     for i in range(start_index, end_index + 1):
@@ -146,7 +126,7 @@ def line_crosses_candles(data, slope, intercept, start_index, end_index):
             body_crosses += 1
     return body_crosses > 1
 
-# Detect breakouts
+# Détection des breakouts
 def isBreakOut(df, candle, window=1):
     for backcandles in [14, 20, 40, 60]:  
         if (candle - backcandles - window) < 0:
@@ -174,25 +154,7 @@ def isBreakOut(df, candle, window=1):
             return 1, sl_lows, interc_lows
     return 0, None, None
 
-# Confirm breakout
-def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
-    if breakout_index + confirmation_candles >= len(df):
-        return None, None
-    breakout_type = df.loc[breakout_index, 'Breakout_Type']
-    breakout_price = df.loc[breakout_index, 'Intercept']
-    last_confirmed_price = df.iloc[breakout_index + confirmation_candles]['Close']
-    price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
-    if breakout_type == 1:
-        if price_variation_percentage <= -threshold_percentage:
-            return 'VB', price_variation_percentage
-        else:
-            return 'FB', price_variation_percentage
-    elif breakout_type == 2:
-        if price_variation_percentage >= threshold_percentage:
-            return 'VH', price_variation_percentage
-        else:
-            return 'FH', price_variation_percentage
-
+# Calcul des indicateurs techniques
 def calculate_sma(df, periods):
     for period in periods:
         sma_key = f'SMA_{period}'
@@ -239,7 +201,7 @@ def calculate_keltner_channel(df, ema_period=20, atr_period=20, multiplier=2):
     df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']
     return df
 
-# Calculate indicators
+# Calcul de tous les indicateurs techniques
 def calculate_all_indicators(df):
     df = calculate_sma(df, [7, 20, 50, 200])
     df = calculate_macd(df)
@@ -249,7 +211,7 @@ def calculate_all_indicators(df):
     df = calculate_keltner_channel(df)
     return df
 
-# Extract and flatten features
+# Extraction et aplatissement des features
 def extract_and_flatten_features(candle, df):
     if candle < 14:
         return None
@@ -271,7 +233,7 @@ def extract_and_flatten_features(candle, df):
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
 
-# Detect and label breakouts
+# Détection et étiquetage des breakouts
 def detect_and_label_breakouts(df):
     Breakout_indices = []
     Breakout_confirmed = []
@@ -289,9 +251,9 @@ def detect_and_label_breakouts(df):
                 Breakout_percentage.append(variation)
     return df
 
-# Train and save the model
+# Fonction d'entraînement et d'enregistrement du modèle sur la VM
 def train_and_save_model(session, table_name):
-    df = session.table(table_name).to_pandas()
+    df = pd.read_sql(f'SELECT * FROM {table_name}', session)
     df = calculate_all_indicators(df)
     df['SAR_Reversals'] = calculate_pivot_reversals(df)
     results = [isBreakOut(df, i) for i in range(len(df))]
@@ -332,18 +294,26 @@ def train_and_save_model(session, table_name):
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
 
+def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
+    if breakout_index + confirmation_candles >= len(df):
+        return None, None  
 
-# Send Telegram notification
-def send_telegram_message(message):
-    payload = {
-        'chat_id': TELEGRAM_CHAT_ID,
-        'text': message
-    }
-    response = requests.post(TELEGRAM_API_URL, data=payload)
-    if response.status_code != 200:
-        print(f"Failed to send message: {response.text}")
+    breakout_type = df.loc[breakout_index, 'Breakout_Type']
+    breakout_price = df.loc[breakout_index, 'Intercept'] 
+    last_confirmed_price = df.iloc[breakout_index + confirmation_candles]['Close']
+    price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
 
-# Main function
+    if breakout_type == 1:  
+        if price_variation_percentage <= -threshold_percentage:
+            return 'VB', price_variation_percentage  #  (Vrai Baissier)
+        else:
+            return 'FB', price_variation_percentage  #  (Faux Baissier)
+    elif breakout_type == 2:  
+        if price_variation_percentage >= threshold_percentage:
+            return 'VH', price_variation_percentage  
+        else:
+            return 'FH', price_variation_percentage 
+
 def main():
     SP500_CONN = {
         'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
@@ -367,19 +337,18 @@ def main():
 
     symbol = 'AAPL'
     table_name = f'ohlcv_data_{symbol}'.upper()
-    last_date = get_last_date(conn, table_name)
+    last_date = get_last_date(conn, SP500_CONN['schema'], table_name)
     data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
     
     # Charger les données dans Snowflake
-    # load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
+    load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
 
-    query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
-    df = pd.read_sql(query, conn)
-    print("Start training the model")
-    train_and_save_model(conn, table_name)
+    train_and_save_model(conn, f"{SP500_CONN['schema']}.{table_name}")
 
     # Simulation de prédiction avec le modèle
     print('[MAIN] : Predicting with model...')
+    query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
+    df = pd.read_sql(query, conn)
     today_idx = df.index[-1]
     breakout_type, slope, intercept = isBreakOut(df, today_idx)
     if breakout_type > 0:
@@ -403,4 +372,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
