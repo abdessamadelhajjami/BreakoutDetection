@@ -30,6 +30,7 @@ def get_sp500_components():
 
 def download_sp500_data(symbol, start, end):
     data = yf.download(symbol, start=start, end=end)
+    data.reset_index(inplace=True)
     return data
 
 def table_exists(conn, schema, table_name):
@@ -61,7 +62,7 @@ def create_table_if_not_exists(conn, schema, table_name):
     cursor = conn.cursor()
     cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS "{schema}"."{table_name.upper()}" (
-            "IDX" INT,
+            
             "Date" DATE, 
             "Open" FLOAT, 
             "High" FLOAT, 
@@ -74,7 +75,7 @@ def create_table_if_not_exists(conn, schema, table_name):
             "Slope" FLOAT,
             "Intercept" FLOAT,
             "Breakout_Confirmed" STRING,
-            "Price_Variation_Percentage" FLOAT,
+          
             "Norm_SMA_7" FLOAT,
             "Norm_SMA_20" FLOAT,
             "Norm_SMA_50" FLOAT,
@@ -91,8 +92,7 @@ def create_table_if_not_exists(conn, schema, table_name):
 
 def load_data_to_snowflake(conn, df, schema, table_name):
     create_table_if_not_exists(conn, schema, table_name)
-    df.reset_index(inplace=True)
-    df.rename(columns={'index': 'IDX'}, inplace=True)
+    
     df.columns = [col.replace(' ', '_') for col in df.columns]
     df['Date'] = df['Date'].astype(str)
     success, nchunks, nrows, _ = write_pandas(conn, df, table_name.upper())
@@ -327,9 +327,7 @@ def calculate_and_save_features(conn, schema, table_name):
     df['Intercept'] = [r[2] for r in results]
     df = detect_and_label_breakouts(df)
 
-    # Réinitialiser l'index et renommer la colonne d'index pour éviter les conflits
-    df.reset_index(inplace=True)
-    df.rename(columns={'index': 'IDX'}, inplace=True)
+    
 
     # Enregistrer les données avec les features calculées dans Snowflake
     create_table_if_not_exists(conn, schema, table_name + '_FEATURES')
