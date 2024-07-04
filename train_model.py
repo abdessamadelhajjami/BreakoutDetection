@@ -317,13 +317,16 @@ def calculate_and_save_features(conn, schema, table_name):
     df['Intercept'] = [r[2] for r in results]
     df = detect_and_label_breakouts(df)
 
+    # Assure-toi que l'index est numérique
+    df.reset_index(drop=True, inplace=True)
+
     # Calculer les features
     features_list = []
     for index in df.index:
         features = extract_and_flatten_features(index, df)
         if features is not None:
             features_list.append(features)
-    
+
     features_df = pd.DataFrame(features_list, columns=[
         "Norm_SMA_7", "Norm_SMA_20", "Norm_SMA_50", "Norm_SMA_200", 
         "Norm_MACD", "Norm_RSI", "Norm_Bollinger_Width", 
