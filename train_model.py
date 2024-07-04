@@ -363,13 +363,13 @@ def main():
     )
     print('[MAIN] : Connected to Snowflake for SP500 data.')
 
-    symbol = 'AAPL'
+    symbol = 'AAL'
     table_name = f'ohlcv_data_{symbol}'.upper()
     
  
 
     # Télécharger les données OHLCV
-    start_date = get_last_date(conn, SP500_CONN['schema'], table_name)
+    start_date =  pd.Timestamp.today().strftime('%Y-%m-%d')
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
     data = download_sp500_data(symbol, start_date, end_date)
 
