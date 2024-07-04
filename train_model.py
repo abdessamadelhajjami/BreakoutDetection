@@ -112,16 +112,7 @@ def calculate_pivot_reversals(df, window=3):
     df['SAR_Reversals'] = pivot_series[candle]
     return df
 
-def calculate_and_save_pivot_reversals(conn, schema, table_name):
-    query = f'SELECT * FROM {schema}.{table_name}'
-    df = pd.read_sql(query, conn)
 
-    df = calculate_pivot_reversals(df)
-
-    success, nchunks, nrows, _ = write_pandas(conn, df, table_name.upper())
-    return success, nchunks, nrows
-
-# 3. Détecter les breakouts et ajouter les colonnes slope, intercept, et breakout_type à la base de données.
 def collect_channel(df, candle, backcandles, window=1):
     localdf = df[candle-backcandles-window:candle-window]
     highs, idxhighs = localdf[localdf['SAR_Reversals'] == 1].High.values, localdf[localdf['SAR_Reversals'] == 1].High.index
@@ -178,7 +169,31 @@ def detect_breakouts(df):
     df['Intercept'] = [r[2] for r in results]
     return df
 
-# 4. Calculer les 13 features et les ajouter à la base de données.
+def update_table_with_calculated_values(conn, schema, table_name):
+    query = f'SELECT * FROM {schema}.{table_name}'
+    df = pd.read_sql(query, conn)
+    print(f"Loaded data from {schema}.{table_name}")
+    print(df.head())  # Imprime les premières lignes pour vérifier
+
+    df['SAR_Reversals'] = calculate_pivot_reversals(df)
+    results = [isBreakOut(df, i) for i in range(len(df))]
+    df['Breakout_Type'] = [r[0] for r in results]
+    df['Slope'] = [r[1] for r in results]
+    df['Intercept'] = [r[2] for r in results]
+
+    # Charger les valeurs calculées dans Snowflake
+    for index, row in df.iterrows():
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            UPDATE {schema}.{table_name}
+            SET SAR_Reversals = %s, Breakout_Type = %s, Slope = %s, Intercept = %s
+            WHERE Date = %s;
+        """, (row['SAR_Reversals'], row['Breakout_Type'], row['Slope'], row['Intercept'], row['Date']))
+        cursor.close()
+    print(f"Updated {schema}.{table_name} with calculated values")
+
+
+
 def calculate_sma(df, periods):
     for period in periods:
         sma_key = f'SMA_{period}'
@@ -351,16 +366,19 @@ def main():
     symbol = 'AAPL'
     table_name = f'ohlcv_data_{symbol}'.upper()
     
+ 
+
+    # Télécharger les données OHLCV
     start_date = get_last_date(conn, SP500_CONN['schema'], table_name)
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
-    data = download_sp500_data(symbol, start_date, end_date)
+    # data = download_sp500_data(symbol, start_date, end_date)
 
     if not data.empty:
         success, nchunks, nrows = load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
         print(f"Data loaded to Snowflake: {success}, {nchunks}, {nrows} rows")
 
-    calculate_and_save_pivot_reversals(conn, SP500_CONN['schema'], table_name)
-    print("finicsh")
+    # Mettre à jour la table avec les valeurs calculées
+    update_table_with_calculated_values(conn, SP500_CONN['schema'], table_name)
 
 if __name__ == "__main__":
     main()
