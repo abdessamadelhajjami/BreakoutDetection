@@ -282,14 +282,16 @@ def calculate_and_save_features(conn, schema, table_name):
     df['Date'] = df['Date'].astype(str)
     success, nchunks, nrows, _ = write_pandas(conn, df, table_name + '_FEATURES')
     return success, nchunks, nrows
-# Detect and label breakouts
+
+
+
 def detect_and_label_breakouts(df):
     Breakout_indices = []
     Breakout_confirmed = []
     Breakout_percentage = []
 
     for index in df.index:
-        if df.loc[index, 'Breakout Type'] in [1, 2]:
+        if df.loc[index, 'Breakout_Type'] in [1, 2]:
             result = confirm_breakout(df, index)
             if result:
                 confirmation_label, variation = result
@@ -392,6 +394,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
+
     
     
