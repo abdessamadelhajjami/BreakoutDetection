@@ -371,7 +371,7 @@ def main():
     # Télécharger les données OHLCV
     start_date = get_last_date(conn, SP500_CONN['schema'], table_name)
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
-    # data = download_sp500_data(symbol, start_date, end_date)
+    data = download_sp500_data(symbol, start_date, end_date)
 
     if not data.empty:
         success, nchunks, nrows = load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
