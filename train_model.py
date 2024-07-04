@@ -11,6 +11,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 import joblib
 import requests
+from sqlalchemy import create_engine
 import os
 
 # Telegram bot configuration
