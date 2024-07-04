@@ -252,6 +252,7 @@ def detect_and_label_breakouts(df):
     return df
 
 # Fonction d'entraînement et d'enregistrement du modèle sur la VM
+# Fonction d'entraînement et d'enregistrement du modèle sur la VM
 def train_and_save_model(df, table_name):
     df = calculate_all_indicators(df)
     df['SAR Reversals'] = calculate_pivot_reversals(df)
@@ -259,18 +260,36 @@ def train_and_save_model(df, table_name):
     df['Breakout Type'] = [r[0] for r in results]
     df['Slope'] = [r[1] for r in results]
     df['Intercept'] = [r[2] for r in results]
-    df = detect_and_label_breakouts(df)
-    Breakout_indices = df[df['Breakout_Confirmed'].notna()].index
+
+    # Ajout des colonnes de confirmation des breakouts
+    Breakout_indices = []
+    Breakout_confirmed = []
+    Breakout_percentage = []
+    
+    for index in df.index:
+        if df.loc[index, 'Breakout Type'] in [1, 2]:  
+            result = confirm_breakout(df, index)
+            if result:  
+                confirmation_label, variation = result
+                df.at[index, 'Breakout Confirmed'] = confirmation_label
+                df.at[index, 'Price Variation %'] = variation
+                
+                Breakout_indices.append(index)
+                Breakout_confirmed.append(confirmation_label)
+                Breakout_percentage.append(variation)
+
     features = []
     labels = []
     for index in Breakout_indices:
         flat_features = extract_and_flatten_features(index, df)
         if flat_features is not None:
             features.append(flat_features)
-            labels.append(df.loc[index, 'Breakout_Confirmed'])
+            labels.append(df.loc[index, 'Breakout Confirmed'])
+    
     if not features:
         print(f"No valid data to train for {table_name}")
         return
+
     X, y = np.array(features), np.array(labels)
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     scaler = StandardScaler()
@@ -286,6 +305,28 @@ def train_and_save_model(df, table_name):
     model_filename = f"{table_name}_model.pkl"
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
+
+# Fonction pour confirmer les breakouts
+def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
+    if breakout_index + confirmation_candles >= len(df):
+        return None, None  
+
+    breakout_type = df.loc[breakout_index, 'Breakout Type']
+    breakout_price = df.loc[breakout_index, 'Intercept'] 
+    last_confirmed_price = df.iloc[breakout_index + confirmation_candles]['Close']
+    price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
+
+    if breakout_type == 1:  
+        if price_variation_percentage <= -threshold_percentage:
+            return 'VB', price_variation_percentage  #  (Vrai Baissier)
+        else:
+            return 'FB', price_variation_percentage  #  (Faux Baissier)
+    elif breakout_type == 2:  
+        if price_variation_percentage >= threshold_percentage:
+            return 'VH', price_variation_percentage  
+        else:
+            return 'FH', price_variation_percentage 
+
 
 def main():
     SP500_CONN = {
@@ -318,7 +359,7 @@ def main():
 
     query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
     df = pd.read_sql(query, conn)
-
+    print("Start training the model")
     train_and_save_model(df, table_name)
 
     # Simulation de prédiction avec le modèle
