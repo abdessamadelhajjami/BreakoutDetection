@@ -268,16 +268,19 @@ def calculate_and_save_features(conn, schema, table_name):
     query = f'SELECT * FROM {schema}.{table_name}'
     df = pd.read_sql(query, conn)
     df = calculate_all_indicators(df)
-    df['SAR Reversals'] = calculate_pivot_reversals(df)
+    df['SAR_Reversals'] = calculate_pivot_reversals(df)
     results = [isBreakOut(df, i) for i in range(len(df))]
     df['Breakout_Type'] = [r[0] for r in results]
     df['Slope'] = [r[1] for r in results]
     df['Intercept'] = [r[2] for r in results]
     df = detect_and_label_breakouts(df)
 
+    # Réinitialiser l'index et renommer la colonne d'index
+    df.reset_index(inplace=True)
+    df.rename(columns={'index': 'Idx'}, inplace=True)
+
     # Enregistrer les données avec les features calculées dans Snowflake
     create_table_if_not_exists(conn, schema, table_name + '_FEATURES')
-    df.reset_index(inplace=True)
     df.columns = [col.replace(' ', '_') for col in df.columns]
     df['Date'] = df['Date'].astype(str)
     success, nchunks, nrows, _ = write_pandas(conn, df, table_name + '_FEATURES')
