@@ -17,6 +17,8 @@ import gzip
 import shutil
 import subprocess
 import warnings
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.model_selection import train_test_split
 
 
 
@@ -88,6 +90,14 @@ def load_data_to_snowflake(conn, df, schema, table_name):
     success, nchunks, nrows, _ = write_pandas(conn, df, table_name.upper())
     return success, nchunks, nrows
 
+def download_and_load_data_to_snowflake(symbol, conn, schema):
+    start_date = '2010-01-01'
+    end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
+    data = yf.download(symbol, start=start_date, end=end_date)
+    table_name = f'ohlcv_data_{symbol}'.upper()
+    load_data_to_snowflake(conn, data, schema, table_name)
+    return table_name
+
 def calculate_pivot_reversals(df, window=3):
     pivot_series = pd.Series([0]*len(df), index=df.index)
     for candle in range(window, len(df) - window):
@@ -155,54 +165,86 @@ def isBreakOut(df, candle, window=1):
             return 1, sl_lows, interc_lows
     return 0, None, None
 
-def calculate_all_indicators(df):
-    df['Pivot_Reversals'] = calculate_pivot_reversals(df)
-    df['SMA_7'] = df['Close'].rolling(window=7).mean()
-    df['SMA_20'] = df['Close'].rolling(window=20).mean()
-    df['SMA_50'] = df['Close'].rolling(window=50).mean()
-    df['SMA_200'] = df['Close'].rolling(window=200).mean()
-    exp1 = df['Close'].ewm(span=12, adjust=False).mean()
-    exp2 = df['Close'].ewm(span=26, adjust=False).mean()
-    df['MACD'] = exp1 - exp2
-    df['MACD_signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+# Confirm breakout
+def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
+    if breakout_index + confirmation_candles >= len(df):
+        return None, None
+    breakout_type = df.loc[breakout_index, 'Breakout Type']
+    breakout_price = df.loc[breakout_index, 'Intercept']
+    last_confirmed_price = df.iloc[breakout_index + confirmation_candles]['Close']
+    price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
+    if breakout_type == 1:
+        if price_variation_percentage <= -threshold_percentage:
+            return 'VB', price_variation_percentage
+        else:
+            return 'FB', price_variation_percentage
+    elif breakout_type == 2:
+        if price_variation_percentage >= threshold_percentage:
+            return 'VH', price_variation_percentage
+        else:
+            return 'FH', price_variation_percentage
+
+
+def calculate_sma(df, periods):
+    for period in periods:
+        sma_key = f'SMA_{period}'
+        df[sma_key] = df['Close'].rolling(window=period).mean()
+    return df
+
+def calculate_macd(df, fast_period=12, slow_period=26, signal_period=9):
+    exp1 = df['Close'].ewm(span=fast_period, adjust=False).mean()
+    exp2 = df['Close'].ewm(span=slow_period, adjust=False).mean()
+    macd = exp1 - exp2
+    signal = macd.ewm(span=signal_period, adjust=False).mean()
+    df['MACD'] = macd
+    df['MACD_signal'] = signal
+    return df
+
+def calculate_rsi(df, period=14):
     delta = df['Close'].diff(1)
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
-    mid_band = df['Close'].rolling(window=20).mean()
-    sd = df['Close'].rolling(window=20).std()
-    df['Bollinger_High'] = mid_band + (2 * sd)
-    df['Bollinger_Low'] = mid_band - (2 * sd)
+    return df
+
+def calculate_bbands(df, period=20, std_dev=2):
+    mid_band = df['Close'].rolling(window=period).mean()
+    sd = df['Close'].rolling(window=period).std()
+    df['Bollinger_High'] = mid_band + (std_dev * sd)
+    df['Bollinger_Low'] = mid_band - (std_dev * sd)
     df['Bollinger_Mid'] = mid_band
-    df['Volume_MA'] = df['Volume'].rolling(window=20).mean()
-    df['Keltner_Mid'] = df['Close'].ewm(span=20, adjust=False).mean()
+    return df
+
+def calculate_volume_ma(df, period=20):
+    df['Volume_MA'] = df['Volume'].rolling(window=period).mean()
+    return df
+
+def calculate_keltner_channel(df, ema_period=20, atr_period=20, multiplier=2):
+    df['Keltner_Mid'] = df['Close'].ewm(span=ema_period, adjust=False).mean()
     high_low = df['High'] - df['Low']
     high_close = (df['High'] - df['Close'].shift()).abs()
     low_close = (df['Low'] - df['Close'].shift()).abs()
     ranges = pd.concat([high_low, high_close, low_close], axis=1)
-    df['ATR'] = ranges.max(axis=1).rolling(window=20).mean()
-    df['Keltner_High'] = df['Keltner_Mid'] + 2 * df['ATR']
-    df['Keltner_Low'] = df['Keltner_Mid'] - 2 * df['ATR']
-    
-    # Add Slope and Intercept calculation for all rows
-    slopes = []
-    intercepts = []
-    breakout_types = []
-    for i in range(len(df)):
-        breakout_type, slope, intercept = isBreakOut(df, i)
-        slopes.append(slope)
-        intercepts.append(intercept)
-        breakout_types.append(breakout_type)
-    df['Slope'] = slopes
-    df['Intercept'] = intercepts
-    df['Breakout_Type'] = breakout_types
-    
+    df['ATR'] = ranges.max(axis=1).rolling(window=atr_period).mean()
+    df['Keltner_High'] = df['Keltner_Mid'] + multiplier * df['ATR']
+    df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']
     return df
 
-def extract_and_flatten_features(df, candle):
+# Calculate indicators
+def calculate_all_indicators(df):
+    df = calculate_sma(df, [7, 20, 50, 200])
+    df = calculate_macd(df)
+    df = calculate_rsi(df)
+    df = calculate_bbands(df)
+    df = calculate_volume_ma(df)
+    df = calculate_keltner_channel(df)
+    return df
+
+# Extract and flatten features
+def extract_and_flatten_features(candle, df):
     if candle < 14:
-        return np.array([])
+        return None
     data_window = df.iloc[candle-14:candle]
     normalized_data = pd.DataFrame()
     for period in [7, 20, 50, 200]:
@@ -216,33 +258,108 @@ def extract_and_flatten_features(df, candle):
     normalized_data['Norm_Keltner_Low'] = (data_window['Keltner_Low'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
     normalized_data['Slope'] = df['Slope'].iloc[candle]
     normalized_data['Intercept'] = df['Intercept'].iloc[candle]
-    normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
+    normalized_data['Breakout_Type'] = df['Breakout Type'].iloc[candle]
     flattened_features = normalized_data.values.flatten().tolist()
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
 
 
-import subprocess
+def calculate_and_save_features(conn, schema, table_name):
+    query = f'SELECT * FROM {schema}.{table_name}'
+    df = pd.read_sql(query, conn)
+    df = calculate_all_indicators(df)
+    df['SAR Reversals'] = calculate_pivot_reversals(df)
+    results = [isBreakOut(df, i) for i in range(len(df))]
+    df['Breakout_Type'] = [r[0] for r in results]
+    df['Slope'] = [r[1] for r in results]
+    df['Intercept'] = [r[2] for r in results]
+    df = detect_and_label_breakouts(df)
 
-def download_model_from_snowflake(account, user, stage, model_file, local_dir):
-    # Construire la commande SnowSQL GET
-    get_command = f'snowsql -a {account} -u {user} -q "GET @{stage}/{model_file} file://{local_dir}"'
+    # Enregistrer les données avec les features calculées dans Snowflake
+    create_table_if_not_exists(conn, schema, table_name + '_FEATURES')
+    df.reset_index(inplace=True)
+    df.columns = [col.replace(' ', '_') for col in df.columns]
+    df['Date'] = df['Date'].astype(str)
+    success, nchunks, nrows, _ = write_pandas(conn, df, table_name + '_FEATURES')
+    return success, nchunks, nrows
+# Detect and label breakouts
+def detect_and_label_breakouts(df):
+    Breakout_indices = []
+    Breakout_confirmed = []
+    Breakout_percentage = []
 
-    # Exécuter la commande GET
-    subprocess.run(get_command, shell=True, check=True)
+    for index in df.index:
+        if df.loc[index, 'Breakout Type'] in [1, 2]:
+            result = confirm_breakout(df, index)
+            if result:
+                confirmation_label, variation = result
+                df.at[index, 'Breakout_Confirmed'] = confirmation_label
+                df.at[index, 'Price_Variation_Percentage'] = variation
+                Breakout_indices.append(index)
+                Breakout_confirmed.append(confirmation_label)
+                Breakout_percentage.append(variation)
+    return df
 
-def load_model():
-    try:
+
+
+def train_and_save_model_from_snowflake(conn, schema, table_name):
+    query = f'SELECT * FROM {schema}.{table_name}_FEATURES'
+    df = pd.read_sql(query, conn)
+    Breakout_indices = df[df['Breakout_Confirmed'].notna()].index
+    features = []
+    labels = []
+    for index in Breakout_indices:
+        flat_features = extract_and_flatten_features(index, df)
+        if flat_features is not None:
+            features.append(flat_features)
+            labels.append(df.loc[index, 'Breakout_Confirmed'])
+    if not features:
+        print(f"No valid data to train for {table_name}")
+        return
+    X, y = np.array(features), np.array(labels)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    model = RandomForestClassifier(n_estimators=800, max_depth=10, random_state=42, n_jobs=1)
+    model.fit(X_train_scaled, y_train)
+    y_pred = model.predict(X_test_scaled)
+    accuracy = accuracy_score(y_test, y_pred)
+    report = classification_report(y_test, y_pred, zero_division=0)
+    print(f"Accuracy on test data for {table_name}: {accuracy}")
+    print(f"Classification Report for {table_name}:\n{report}")
+    model_filename = f"{table_name}_model.pkl"
+    joblib.dump(model, model_filename)
+    print(f"Model saved as {model_filename}")
+
+def detect_breakout_and_predict(conn, schema, symbol):
+    table_name = f'ohlcv_data_{symbol}'.upper()
+    query = f'SELECT * FROM {schema}.{table_name}_FEATURES'
+    df = pd.read_sql(query, conn)
+
+    today_idx = df.index[-1]
+    breakout_type, slope, intercept = isBreakOut(df, today_idx)
+
+    if breakout_type > 0:
+        features = extract_and_flatten_features(today_idx, df)
+        if features is None or features.size == 0:
+            return
+
+        model_filename = f"{table_name}_model.pkl"
+
+        # Charger le modèle avec joblib
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=UserWarning)
-            model = joblib.load('OHLCV_DATA_TTWO_model.pkl')
-        return model
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        return None
-
-
-
+            warnings.simplefilter("ignore")
+            model = joblib.load(model_filename)
+        
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features.reshape(1, -1))
+        prediction = model.predict(features_scaled)
+        
+        if prediction[0] in ['VH', 'VB']:
+            message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
+            send_telegram_message(message)
+            
 def main():
     SP500_CONN = {
         'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
@@ -264,59 +381,17 @@ def main():
     )
     print('[MAIN] : Connected to Snowflake for SP500 data.')
 
-    symbol = 'TTWO'
-    table_name = f'ohlcv_data_{symbol}'.upper()
-    query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
-    
-    try:
-        df = pd.read_sql(query, conn)
-    except Exception as e:
-        print(f"Error reading data from Snowflake: {e}")
-        return
+    symbol = 'AAPL'
+    table_name = download_and_load_data_to_snowflake(symbol, conn, SP500_CONN['schema'])
+    calculate_and_save_features(conn, SP500_CONN['schema'], table_name)
+    train_and_save_model_from_snowflake(conn, SP500_CONN['schema'], table_name)
+    detect_breakout_and_predict(conn, SP500_CONN['schema'], symbol)
 
-    df = calculate_all_indicators(df)
-    today_idx = df.index[-1]
-    breakout_type, slope, intercept = isBreakOut(df, today_idx)
-
-    df.loc[today_idx, 'Slope'] = slope
-    df.loc[today_idx, 'Intercept'] = intercept
-    df.loc[today_idx, 'Breakout_Type'] = breakout_type
-    
-    print(f"Breakout type today for {symbol} is: {breakout_type}")
-    breakout_type = 1  # Pour test
-    slope = -0.2  # Pour test
-    intercept = -0.11  # Pour test
-    
-    if breakout_type > 0:
-        print("YEPP1")
-        features = extract_and_flatten_features(df, today_idx)
-        if features.size == 0:
-            print("Features extraction failed.")
-            return
-
-        model_filename = "OHLCV_DATA_TTWO_model.pkl"
-        
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", category=UserWarning)
-                model = joblib.load(model_filename)
-        except Exception as e:
-            print(f"Error loading model: {e}")
-            return
-        
-        print("YEEP2")
-        scaler = StandardScaler()
-        features_scaled = scaler.fit_transform(features.reshape(1, -1))
-        prediction = model.predict(features_scaled)
-        prediction = ['VB']  # Pour le test, on force la prédiction à 'VB'
-        
-        if prediction[0] in ['VH', 'VB']:
-            print("YEEP3")
-            message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
-            send_telegram_message(message)
     print("finish")
     conn.close()
 
 if __name__ == "__main__":
     main()
-
+    
+    
+    
