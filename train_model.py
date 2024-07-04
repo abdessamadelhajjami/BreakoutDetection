@@ -350,11 +350,8 @@ def main():
         success, nchunks, nrows = load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
         print(f"Data loaded to Snowflake: {success}, {nchunks}, {nrows} rows")
 
-    query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
-    df = pd.read_sql(query, conn)
-
-    calculate_and_save_features(conn, SP500_CONN['schema'], table_name)
-    train_and_save_model(df, table_name)
+    calculate_and_save_pivot_reversals(conn, SP500_CONN['schema'], table_name)
+    print("finicsh")
 
 if __name__ == "__main__":
     main()
