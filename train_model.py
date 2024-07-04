@@ -240,8 +240,43 @@ def calculate_all_indicators(df):
     df = calculate_keltner_channel(df)
     return df
 
-# Extract and flatten features
-def extract_and_flatten_features(df, candle):
+
+
+def calculate_and_save_features(conn, schema, table_name):
+    query = f'SELECT * FROM {schema}.{table_name}'
+    df = pd.read_sql(query, conn)
+    df = calculate_all_indicators(df)
+    df['SAR_Reversals'] = calculate_pivot_reversals(df)
+    results = [isBreakOut(df, i) for i in range(len(df))]
+    df['Breakout_Type'] = [r[0] for r in results]
+    df['Slope'] = [r[1] for r in results]
+    df['Intercept'] = [r[2] for r in results]
+    df = detect_and_label_breakouts(df)
+
+    # Assure-toi que l'index est numérique
+    df.reset_index(drop=True, inplace=True)
+    df['Idx'] = df.index  # Ajoute une colonne avec les index numériques
+
+    # Calculer les features
+    features_list = []
+    for index in df['Idx']:  # Utilise la nouvelle colonne d'index numériques
+        features = extract_and_flatten_features(index, df)
+        if features is not None:
+            features_list.append(features)
+
+    features_df = pd.DataFrame(features_list, columns=[
+        "Norm_SMA_7", "Norm_SMA_20", "Norm_SMA_50", "Norm_SMA_200", 
+        "Norm_MACD", "Norm_RSI", "Norm_Bollinger_Width", 
+        "Norm_Volume", "Norm_Keltner_High", "Norm_Keltner_Low", 
+        "Slope", "Intercept", "Breakout_Type"
+    ])
+    features_df['Date'] = df['Date']
+
+    load_data_to_snowflake(conn, features_df, schema, table_name + '_FEATURES')
+
+def extract_and_flatten_features(candle, df):
+    if isinstance(candle, (pd.Timestamp, datetime.date)):
+        candle = df.index.get_loc(candle)
     if candle < 14:
         return None
     data_window = df.iloc[candle-14:candle]
@@ -259,6 +294,7 @@ def extract_and_flatten_features(df, candle):
     normalized_data['Intercept'] = df['Intercept'].iloc[candle]
     normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
     flattened_features = normalized_data.values.flatten().tolist()
+    flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
 
 # Detect and label breakouts
@@ -306,36 +342,7 @@ def train_and_save_model(conn, schema, table_name):
     print(f"Model saved as {model_filename}")
 
 
-def calculate_and_save_features(conn, schema, table_name):
-    query = f'SELECT * FROM {schema}.{table_name}'
-    df = pd.read_sql(query, conn)
-    df = calculate_all_indicators(df)
-    df['SAR_Reversals'] = calculate_pivot_reversals(df)
-    results = [isBreakOut(df, i) for i in range(len(df))]
-    df['Breakout_Type'] = [r[0] for r in results]
-    df['Slope'] = [r[1] for r in results]
-    df['Intercept'] = [r[2] for r in results]
-    df = detect_and_label_breakouts(df)
 
-    # Assure-toi que l'index est numérique
-    df.reset_index(drop=True, inplace=True)
-
-    # Calculer les features
-    features_list = []
-    for index in df.index:
-        features = extract_and_flatten_features(index, df)
-        if features is not None:
-            features_list.append(features)
-
-    features_df = pd.DataFrame(features_list, columns=[
-        "Norm_SMA_7", "Norm_SMA_20", "Norm_SMA_50", "Norm_SMA_200", 
-        "Norm_MACD", "Norm_RSI", "Norm_Bollinger_Width", 
-        "Norm_Volume", "Norm_Keltner_High", "Norm_Keltner_Low", 
-        "Slope", "Intercept", "Breakout_Type"
-    ])
-    features_df['Date'] = df['Date']
-
-    load_data_to_snowflake(conn, features_df, schema, table_name + '_FEATURES')
 
 def predict_with_model(conn, schema, table_name, model_filename):
     model = joblib.load(model_filename)
