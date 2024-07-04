@@ -251,9 +251,11 @@ def detect_and_label_breakouts(df):
                 Breakout_percentage.append(variation)
     return df
 
-# Fonction d'entraînement et d'enregistrement du modèle sur la VM
-def train_and_save_model(session, table_name):
-    df = pd.read_sql(f'SELECT * FROM {table_name}', session)
+from sqlalchemy import create_engine
+
+# Correction de la fonction `train_and_save_model` pour utiliser SQLAlchemy
+def train_and_save_model(engine, table_name):
+    df = pd.read_sql(f'SELECT * FROM {table_name}', engine)
     df = calculate_all_indicators(df)
     df['SAR_Reversals'] = calculate_pivot_reversals(df)
     results = [isBreakOut(df, i) for i in range(len(df))]
@@ -294,6 +296,7 @@ def train_and_save_model(session, table_name):
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
 
+
 def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
     if breakout_index + confirmation_candles >= len(df):
         return None, None  
@@ -324,6 +327,10 @@ def main():
         'schema': 'SP500',
     }
 
+    # Création de l'URL de connexion SQLAlchemy
+    conn_str = f'snowflake://{SP500_CONN["user"]}:{SP500_CONN["password"]}@{SP500_CONN["account"]}/{SP500_CONN["database"]}/{SP500_CONN["schema"]}?warehouse={SP500_CONN["warehouse"]}'
+    engine = create_engine(conn_str)
+
     print('[MAIN] : Connecting to Snowflake for SP500 data...')
     conn = snowflake.connector.connect(
         user=SP500_CONN['user'],
@@ -335,7 +342,7 @@ def main():
     )
     print('[MAIN] : Connected to Snowflake for SP500 data.')
 
-    symbol = 'MMM'
+    symbol = 'AAPL'
     table_name = f'ohlcv_data_{symbol}'.upper()
     last_date = get_last_date(conn, SP500_CONN['schema'], table_name)
     data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
@@ -343,12 +350,12 @@ def main():
     # Charger les données dans Snowflake
     load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
 
-    train_and_save_model(conn, f"{SP500_CONN['schema']}.{table_name}")
+    train_and_save_model(engine, f"{SP500_CONN['schema']}.{table_name}")
 
     # Simulation de prédiction avec le modèle
     print('[MAIN] : Predicting with model...')
     query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
-    df = pd.read_sql(query, conn)
+    df = pd.read_sql(query, engine)
     today_idx = df.index[-1]
     breakout_type, slope, intercept = isBreakOut(df, today_idx)
     if breakout_type > 0:
@@ -372,3 +379,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
