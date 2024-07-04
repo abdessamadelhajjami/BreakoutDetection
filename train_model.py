@@ -253,8 +253,8 @@ def train_and_save_model(df, table_name):
     df['SAR Reversals'] = calculate_pivot_reversals(df)
     results = [isBreakOut(df, i) for i in range(len(df))]
     df['Breakout Type'] = [r[0] for r in results]
-    df['Slope'] = [r[1] for r[2]]
-    df['Intercept'] = [r[2] for r[2]]
+    df['Slope'] = [r[1] for r in results]
+    df['Intercept'] = [r[2] for r in results]
     df = detect_and_label_breakouts(df)
     Breakout_indices = df[df['Breakout_Confirmed'].notna()].index
     features = []
