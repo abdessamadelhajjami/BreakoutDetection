@@ -109,8 +109,8 @@ def calculate_pivot_reversals(df, window=3):
             pivot_series[candle] = 2
         elif pivotLow:
             pivot_series[candle] = 1
-    df['SAR_Reversals'] = pivot_series
-    return df
+    
+    return pivot_series
 
 
 def collect_channel(df, candle, backcandles, window=1):
@@ -170,35 +170,7 @@ def detect_breakouts(df):
     return df
 
 
-  def update_table_with_calculated_values(conn, schema, table_name):
-    query = f'SELECT * FROM {schema}.{table_name}'
-    df = pd.read_sql(query, conn)
-    print(f"Loaded data from {schema}.{table_name}")
-    print(df.head())  # Imprime les premières lignes pour vérifier
-
-    # Vérifiez la longueur des données retournées
-    sar_reversals = calculate_pivot_reversals(df)
-    if len(sar_reversals) != len(df):
-        raise ValueError("Length of SAR_Reversals does not match length of DataFrame")
-
-    df['SAR_Reversals'] = sar_reversals
-    results = [isBreakOut(df, i) for i in range(len(df))]
-    df['Breakout_Type'] = [r[0] for r in results]
-    df['Slope'] = [r[1] for r in results]
-    df['Intercept'] = [r[2] for r in results]
-
-    # Charger les valeurs calculées dans Snowflake
-    for index, row in df.iterrows():
-        cursor = conn.cursor()
-        cursor.execute(f"""
-            UPDATE {schema}.{table_name}
-            SET SAR_Reversals = %s, Breakout_Type = %s, Slope = %s, Intercept = %s
-            WHERE Date = %s;
-        """, (row['SAR_Reversals'], row['Breakout_Type'], row['Slope'], row['Intercept'], row['Date']))
-        cursor.close()
-    print(f"Updated {schema}.{table_name} with calculated values")
-
-
+ 
 def calculate_sma(df, periods):
     for period in periods:
         sma_key = f'SMA_{period}'
@@ -277,11 +249,11 @@ def extract_and_flatten_features(df, candle):
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
 
-# Detect and label breakouts
+# Détection et étiquetage des breakouts
 def detect_and_label_breakouts(df):
-    breakout_indices = []
-    breakout_confirmed = []
-    breakout_percentage = []
+    Breakout_indices = []
+    Breakout_confirmed = []
+    Breakout_percentage = []
 
     for index in df.index:
         if df.loc[index, 'Breakout_Type'] in [1, 2]:
@@ -290,22 +262,25 @@ def detect_and_label_breakouts(df):
                 confirmation_label, variation = result
                 df.at[index, 'Breakout_Confirmed'] = confirmation_label
                 df.at[index, 'Price_Variation_Percentage'] = variation
-                breakout_indices.append(index)
-                breakout_confirmed.append(confirmation_label)
-                breakout_percentage.append(variation)
+                Breakout_indices.append(index)
+                Breakout_confirmed.append(confirmation_label)
+                Breakout_percentage.append(variation)
     return df
 
 # Fonction d'entraînement et d'enregistrement du modèle sur la VM
 def train_and_save_model(df, table_name):
     df = calculate_all_indicators(df)
     df['SAR_Reversals'] = calculate_pivot_reversals(df)
-    df = detect_breakouts(df)
+    results = [isBreakOut(df, i) for i in range(len(df))]
+    df['Breakout_Type'] = [r[0] for r in results]
+    df['Slope'] = [r[1] for r in results]
+    df['Intercept'] = [r[2] for r in results]
     df = detect_and_label_breakouts(df)
-    breakout_indices = df[df['Breakout_Confirmed'].notna()].index
+    Breakout_indices = df[df['Breakout_Confirmed'].notna()].index
     features = []
     labels = []
-    for index in breakout_indices:
-        flat_features = extract_and_flatten_features(df, index)
+    for index in Breakout_indices:
+        flat_features = extract_and_flatten_features(index, df)
         if flat_features is not None:
             features.append(flat_features)
             labels.append(df.loc[index, 'Breakout_Confirmed'])
@@ -327,25 +302,6 @@ def train_and_save_model(df, table_name):
     model_filename = f"{table_name}_model.pkl"
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
-
-def calculate_and_save_features(conn, schema, table_name):
-    query = f'SELECT * FROM {schema}.{table_name}'
-    df = pd.read_sql(query, conn)
-    df = calculate_all_indicators(df)
-    df['SAR Reversals'] = calculate_pivot_reversals(df)
-    results = [isBreakOut(df, i) for i in range(len(df))]
-    df['Breakout_Type'] = [r[0] for r in results]
-    df['Slope'] = [r[1] for r in results]
-    df['Intercept'] = [r[2] for r in results]
-    df = detect_and_label_breakouts(df)
-
-    # Enregistrer les données avec les features calculées dans Snowflake
-    create_table_if_not_exists(conn, schema, table_name + '_FEATURES')
-    df.reset_index(inplace=True)
-    df.columns = [col.replace(' ', '_') for col in df.columns]
-    df['Date'] = df['Date'].astype(str)
-    success, nchunks, nrows, _ = write_pandas(conn, df, table_name + '_FEATURES')
-    return success, nchunks, nrows
 
 def main():
     SP500_CONN = {
@@ -370,21 +326,28 @@ def main():
 
     symbol = 'AAPL'
     table_name = f'ohlcv_data_{symbol}'.upper()
-    
-    # Ajouter des colonnes à la table
-    add_columns_to_table(conn, SP500_CONN['schema'], table_name)
 
-    # Télécharger les données OHLCV
-    start_date = get_last_date(conn, SP500_CONN['schema'], table_name)
+    # Télécharger les données de Yahoo Finance et les sauvegarder sur Snowflake
+    start_date = '2010-01-01'
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
-    data = download_sp500_data(symbol, start_date, end_date)
+    df = download_sp500_data(symbol, start_date, end_date)
+    # load_data_to_snowflake(conn, df, SP500_CONN['schema'], table_name)
 
-    if not data.empty:
-        success, nchunks, nrows = load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
-        print(f"Data loaded to Snowflake: {success}, {nchunks}, {nrows} rows")
+    # Calculer et sauvegarder les features
+    calculate_and_save_features(conn, SP500_CONN['schema'], table_name)
 
-    # Mettre à jour la table avec les valeurs calculées
-    update_table_with_calculated_values(conn, SP500_CONN['schema'], table_name)
+    # Télécharger les données avec les features ajoutées
+    query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}_FEATURES'
+    df_with_features = pd.read_sql(query, conn)
+
+    # Entraîner le modèle et sauvegarder localement
+    train_and_save_model(df_with_features, table_name)
+
+    conn.close()
 
 if __name__ == "__main__":
     main()
+
+    
+
+
