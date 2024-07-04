@@ -5,25 +5,15 @@ from scipy import stats
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
 import requests
-from io import BytesIO
-import base64
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report
 import joblib
 import os
-import requests
-import tempfile
-import gzip
-import shutil
-import subprocess
 import warnings
-from sklearn.metrics import accuracy_score, classification_report
-from sklearn.model_selection import train_test_split
 
-
-
-
-# Telegram bot configuration
+# Configuration du bot Telegram
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
 TELEGRAM_CHAT_ID = "-1002197712630"
 
@@ -71,13 +61,30 @@ def create_table_if_not_exists(conn, schema, table_name):
     cursor = conn.cursor()
     cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS "{schema}"."{table_name.upper()}" (
+            "IDX" INT,
             "Date" DATE, 
             "Open" FLOAT, 
             "High" FLOAT, 
             "Low" FLOAT, 
             "Close" FLOAT, 
             "Adj_Close" FLOAT, 
-            "Volume" FLOAT
+            "Volume" FLOAT,
+            "SAR_Reversals" FLOAT,
+            "Breakout_Type" FLOAT,
+            "Slope" FLOAT,
+            "Intercept" FLOAT,
+            "Breakout_Confirmed" STRING,
+            "Price_Variation_Percentage" FLOAT,
+            "Norm_SMA_7" FLOAT,
+            "Norm_SMA_20" FLOAT,
+            "Norm_SMA_50" FLOAT,
+            "Norm_SMA_200" FLOAT,
+            "Norm_MACD" FLOAT,
+            "Norm_RSI" FLOAT,
+            "Norm_Bollinger_Width" FLOAT,
+            "Norm_Volume" FLOAT,
+            "Norm_Keltner_High" FLOAT,
+            "Norm_Keltner_Low" FLOAT
         )
     """)
     cursor.close()
@@ -85,18 +92,11 @@ def create_table_if_not_exists(conn, schema, table_name):
 def load_data_to_snowflake(conn, df, schema, table_name):
     create_table_if_not_exists(conn, schema, table_name)
     df.reset_index(inplace=True)
+    df.rename(columns={'index': 'IDX'}, inplace=True)
     df.columns = [col.replace(' ', '_') for col in df.columns]
     df['Date'] = df['Date'].astype(str)
     success, nchunks, nrows, _ = write_pandas(conn, df, table_name.upper())
     return success, nchunks, nrows
-
-def download_and_load_data_to_snowflake(symbol, conn, schema):
-    start_date = '2010-01-01'
-    end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
-    data = yf.download(symbol, start=start_date, end=end_date)
-    table_name = f'ohlcv_data_{symbol}'.upper()
-    load_data_to_snowflake(conn, data, schema, table_name)
-    return table_name
 
 def calculate_pivot_reversals(df, window=3):
     pivot_series = pd.Series([0]*len(df), index=df.index)
@@ -118,8 +118,8 @@ def calculate_pivot_reversals(df, window=3):
 
 def collect_channel(df, candle, backcandles, window=1):
     localdf = df[candle-backcandles-window:candle-window]
-    highs, idxhighs = localdf[localdf['SAR Reversals'] == 1].High.values, localdf[localdf['SAR Reversals'] == 1].High.index
-    lows, idxlows = localdf[localdf['SAR Reversals'] == 2].Low.values, localdf[localdf['SAR Reversals'] == 2].Low.index
+    highs, idxhighs = localdf[localdf['SAR_Reversals'] == 1].High.values, localdf[localdf['SAR_Reversals'] == 1].High.index
+    lows, idxlows = localdf[localdf['SAR_Reversals'] == 2].Low.values, localdf[localdf['SAR_Reversals'] == 2].Low.index
     if len(lows) >= 2 and len(highs) >= 2:
         sl_lows, interc_lows, sl_highs, interc_highs, _, _ = stats.linregress(idxhighs, highs)
         sl_highs, interc_highs, _, _, _ = stats.linregress(idxlows, lows)
@@ -169,7 +169,7 @@ def isBreakOut(df, candle, window=1):
 def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
     if breakout_index + confirmation_candles >= len(df):
         return None, None
-    breakout_type = df.loc[breakout_index, 'Breakout Type']
+    breakout_type = df.loc[breakout_index, 'Breakout_Type']
     breakout_price = df.loc[breakout_index, 'Intercept']
     last_confirmed_price = df.iloc[breakout_index + confirmation_candles]['Close']
     price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
@@ -183,7 +183,6 @@ def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_perce
             return 'VH', price_variation_percentage
         else:
             return 'FH', price_variation_percentage
-
 
 def calculate_sma(df, periods):
     for period in periods:
@@ -242,7 +241,7 @@ def calculate_all_indicators(df):
     return df
 
 # Extract and flatten features
-def extract_and_flatten_features(candle, df):
+def extract_and_flatten_features(df, candle):
     if candle < 14:
         return None
     data_window = df.iloc[candle-14:candle]
@@ -258,36 +257,11 @@ def extract_and_flatten_features(candle, df):
     normalized_data['Norm_Keltner_Low'] = (data_window['Keltner_Low'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
     normalized_data['Slope'] = df['Slope'].iloc[candle]
     normalized_data['Intercept'] = df['Intercept'].iloc[candle]
-    normalized_data['Breakout_Type'] = df['Breakout Type'].iloc[candle]
+    normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
     flattened_features = normalized_data.values.flatten().tolist()
-    flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
 
-
-def calculate_and_save_features(conn, schema, table_name):
-    query = f'SELECT * FROM {schema}.{table_name}'
-    df = pd.read_sql(query, conn)
-    df = calculate_all_indicators(df)
-    df['SAR_Reversals'] = calculate_pivot_reversals(df)
-    results = [isBreakOut(df, i) for i in range(len(df))]
-    df['Breakout_Type'] = [r[0] for r in results]
-    df['Slope'] = [r[1] for r in results]
-    df['Intercept'] = [r[2] for r in results]
-    df = detect_and_label_breakouts(df)
-
-    # Réinitialiser l'index et renommer la colonne d'index
-    df.reset_index(inplace=True)
-    df.rename(columns={'index': 'Idx'}, inplace=True)
-
-    # Enregistrer les données avec les features calculées dans Snowflake
-    create_table_if_not_exists(conn, schema, table_name + '_FEATURES')
-    df.columns = [col.replace(' ', '_') for col in df.columns]
-    df['Date'] = df['Date'].astype(str)
-    success, nchunks, nrows, _ = write_pandas(conn, df, table_name + '_FEATURES')
-    return success, nchunks, nrows
-
-
-
+# Detect and label breakouts
 def detect_and_label_breakouts(df):
     Breakout_indices = []
     Breakout_confirmed = []
@@ -305,16 +279,20 @@ def detect_and_label_breakouts(df):
                 Breakout_percentage.append(variation)
     return df
 
-
-
-def train_and_save_model_from_snowflake(conn, schema, table_name):
-    query = f'SELECT * FROM {schema}.{table_name}_FEATURES'
-    df = pd.read_sql(query, conn)
+# Fonction d'entraînement et d'enregistrement du modèle sur la VM
+def train_and_save_model(df, table_name):
+    df = calculate_all_indicators(df)
+    df['SAR_Reversals'] = calculate_pivot_reversals(df)
+    results = [isBreakOut(df, i) for i in range(len(df))]
+    df['Breakout_Type'] = [r[0] for r in results]
+    df['Slope'] = [r[1] for r in results]
+    df['Intercept'] = [r[2] for r in results]
+    df = detect_and_label_breakouts(df)
     Breakout_indices = df[df['Breakout_Confirmed'].notna()].index
     features = []
     labels = []
     for index in Breakout_indices:
-        flat_features = extract_and_flatten_features(index, df)
+        flat_features = extract_and_flatten_features(df, index)
         if flat_features is not None:
             features.append(flat_features)
             labels.append(df.loc[index, 'Breakout_Confirmed'])
@@ -337,34 +315,29 @@ def train_and_save_model_from_snowflake(conn, schema, table_name):
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
 
-def detect_breakout_and_predict(conn, schema, symbol):
-    table_name = f'ohlcv_data_{symbol}'.upper()
-    query = f'SELECT * FROM {schema}.{table_name}_FEATURES'
+# Calculer et enregistrer les features
+def calculate_and_save_features(conn, schema, table_name):
+    query = f'SELECT * FROM {schema}.{table_name}'
     df = pd.read_sql(query, conn)
+    df = calculate_all_indicators(df)
+    df['SAR_Reversals'] = calculate_pivot_reversals(df)
+    results = [isBreakOut(df, i) for i in range(len(df))]
+    df['Breakout_Type'] = [r[0] for r in results]
+    df['Slope'] = [r[1] for r in results]
+    df['Intercept'] = [r[2] for r in results]
+    df = detect_and_label_breakouts(df)
 
-    today_idx = df.index[-1]
-    breakout_type, slope, intercept = isBreakOut(df, today_idx)
+    # Réinitialiser l'index et renommer la colonne d'index pour éviter les conflits
+    df.reset_index(inplace=True)
+    df.rename(columns={'index': 'IDX'}, inplace=True)
 
-    if breakout_type > 0:
-        features = extract_and_flatten_features(today_idx, df)
-        if features is None or features.size == 0:
-            return
+    # Enregistrer les données avec les features calculées dans Snowflake
+    create_table_if_not_exists(conn, schema, table_name + '_FEATURES')
+    df.columns = [col.replace(' ', '_') for col in df.columns]
+    df['Date'] = df['Date'].astype(str)
+    success, nchunks, nrows, _ = write_pandas(conn, df, table_name + '_FEATURES')
+    return success, nchunks, nrows
 
-        model_filename = f"{table_name}_model.pkl"
-
-        # Charger le modèle avec joblib
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            model = joblib.load(model_filename)
-        
-        scaler = StandardScaler()
-        features_scaled = scaler.fit_transform(features.reshape(1, -1))
-        prediction = model.predict(features_scaled)
-        
-        if prediction[0] in ['VH', 'VB']:
-            message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
-            send_telegram_message(message)
-            
 def main():
     SP500_CONN = {
         'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
@@ -387,16 +360,47 @@ def main():
     print('[MAIN] : Connected to Snowflake for SP500 data.')
 
     symbol = 'AAPL'
-    table_name = download_and_load_data_to_snowflake(symbol, conn, SP500_CONN['schema'])
-    calculate_and_save_features(conn, SP500_CONN['schema'], table_name)
-    train_and_save_model_from_snowflake(conn, SP500_CONN['schema'], table_name)
-    detect_breakout_and_predict(conn, SP500_CONN['schema'], symbol)
+    table_name = f'ohlcv_data_{symbol}'.upper()
 
+    # Télécharger les données OHLCV de Yahoo Finance si elles n'existent pas dans Snowflake
+    if not table_exists(conn, SP500_CONN['schema'], table_name):
+        start_date = '2010-01-01'
+        end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
+        df = download_sp500_data(symbol, start=start_date, end=end_date)
+        load_data_to_snowflake(conn, df, SP500_CONN['schema'], table_name)
+
+    # Calculer et enregistrer les features dans Snowflake
+    calculate_and_save_features(conn, SP500_CONN['schema'], table_name)
+
+    # Entraîner et enregistrer le modèle
+    df = pd.read_sql(f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}_FEATURES', conn)
+    train_and_save_model(df, table_name)
+
+    # Vérification quotidienne
+    print('[MAIN] : Checking for breakouts...')
+    today_idx = df.index[-1]
+    breakout_type, slope, intercept = isBreakOut(df, today_idx)
+
+    if breakout_type > 0:
+        print("YEPP1")
+        features = extract_and_flatten_features(df, today_idx)
+        if features.size == 0:
+            return
+
+        model_filename = f"{table_name}_model.pkl"
+        model = joblib.load(model_filename)
+        print("YEEP2")
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features.reshape(1, -1))
+        prediction = model.predict(features_scaled)
+        prediction = ['VB']  # Pour le test, on force la prédiction à 'VB'
+        
+        if prediction[0] in ['VH', 'VB']:
+            print("YEEP3")
+            message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
+            send_telegram_message(message)
     print("finish")
     conn.close()
 
 if __name__ == "__main__":
     main()
-
-    
-    
