@@ -7,14 +7,10 @@ from snowflake.connector.pandas_tools import write_pandas
 import requests
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
 import joblib
 import os
-import warnings
-import datetime 
 
-# Configuration du bot Telegram
+# Telegram bot configuration
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
 TELEGRAM_CHAT_ID = "-1002197712630"
 
@@ -63,7 +59,6 @@ def create_table_if_not_exists(conn, schema, table_name):
     cursor = conn.cursor()
     cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS "{schema}"."{table_name.upper()}" (
-            
             "Date" DATE, 
             "Open" FLOAT, 
             "High" FLOAT, 
@@ -76,7 +71,6 @@ def create_table_if_not_exists(conn, schema, table_name):
             "Slope" FLOAT,
             "Intercept" FLOAT,
             "Breakout_Confirmed" STRING,
-          
             "Norm_SMA_7" FLOAT,
             "Norm_SMA_20" FLOAT,
             "Norm_SMA_50" FLOAT,
@@ -93,12 +87,12 @@ def create_table_if_not_exists(conn, schema, table_name):
 
 def load_data_to_snowflake(conn, df, schema, table_name):
     create_table_if_not_exists(conn, schema, table_name)
-    
     df.columns = [col.replace(' ', '_') for col in df.columns]
     df['Date'] = df['Date'].astype(str)
     success, nchunks, nrows, _ = write_pandas(conn, df, table_name.upper())
     return success, nchunks, nrows
 
+# 2. Calculer les points pivots et les ajouter à la base de données.
 def calculate_pivot_reversals(df, window=3):
     pivot_series = pd.Series([0]*len(df), index=df.index)
     for candle in range(window, len(df) - window):
@@ -115,8 +109,10 @@ def calculate_pivot_reversals(df, window=3):
             pivot_series[candle] = 2
         elif pivotLow:
             pivot_series[candle] = 1
-    return pivot_series
+    df['SAR_Reversals'] = pivot_series
+    return df
 
+# 3. Détecter les breakouts et ajouter les colonnes slope, intercept, et breakout_type à la base de données.
 def collect_channel(df, candle, backcandles, window=1):
     localdf = df[candle-backcandles-window:candle-window]
     highs, idxhighs = localdf[localdf['SAR_Reversals'] == 1].High.values, localdf[localdf['SAR_Reversals'] == 1].High.index
@@ -166,25 +162,14 @@ def isBreakOut(df, candle, window=1):
             return 1, sl_lows, interc_lows
     return 0, None, None
 
-# Confirm breakout
-def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
-    if breakout_index + confirmation_candles >= len(df):
-        return None, None
-    breakout_type = df.loc[breakout_index, 'Breakout_Type']
-    breakout_price = df.loc[breakout_index, 'Intercept']
-    last_confirmed_price = df.iloc[breakout_index + confirmation_candles]['Close']
-    price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
-    if breakout_type == 1:
-        if price_variation_percentage <= -threshold_percentage:
-            return 'VB', price_variation_percentage
-        else:
-            return 'FB', price_variation_percentage
-    elif breakout_type == 2:
-        if price_variation_percentage >= threshold_percentage:
-            return 'VH', price_variation_percentage
-        else:
-            return 'FH', price_variation_percentage
+def detect_breakouts(df):
+    results = [isBreakOut(df, i) for i in range(len(df))]
+    df['Breakout_Type'] = [r[0] for r in results]
+    df['Slope'] = [r[1] for r in results]
+    df['Intercept'] = [r[2] for r in results]
+    return df
 
+# 4. Calculer les 13 features et les ajouter à la base de données.
 def calculate_sma(df, periods):
     for period in periods:
         sma_key = f'SMA_{period}'
@@ -241,43 +226,8 @@ def calculate_all_indicators(df):
     df = calculate_keltner_channel(df)
     return df
 
-
-
-def calculate_and_save_features(conn, schema, table_name):
-    query = f'SELECT * FROM {schema}.{table_name}'
-    df = pd.read_sql(query, conn)
-    df = calculate_all_indicators(df)
-    df['SAR_Reversals'] = calculate_pivot_reversals(df)
-    results = [isBreakOut(df, i) for i in range(len(df))]
-    df['Breakout_Type'] = [r[0] for r in results]
-    df['Slope'] = [r[1] for r in results]
-    df['Intercept'] = [r[2] for r in results]
-    df = detect_and_label_breakouts(df)
-
-    # Assure-toi que l'index est numérique
-    df.reset_index(drop=True, inplace=True)
-    df['Idx'] = df.index  # Ajoute une colonne avec les index numériques
-
-    # Calculer les features
-    features_list = []
-    for index in df['Idx']:  # Utilise la nouvelle colonne d'index numériques
-        features = extract_and_flatten_features(index, df)
-        if features is not None:
-            features_list.append(features)
-
-    features_df = pd.DataFrame(features_list, columns=[
-        "Norm_SMA_7", "Norm_SMA_20", "Norm_SMA_50", "Norm_SMA_200", 
-        "Norm_MACD", "Norm_RSI", "Norm_Bollinger_Width", 
-        "Norm_Volume", "Norm_Keltner_High", "Norm_Keltner_Low", 
-        "Slope", "Intercept", "Breakout_Type"
-    ])
-    features_df['Date'] = df['Date']
-
-    load_data_to_snowflake(conn, features_df, schema, table_name + '_FEATURES')
-
-def extract_and_flatten_features(candle, df):
-    if isinstance(candle, (pd.Timestamp, datetime.date)):
-        candle = df.index.get_loc(candle)
+# Extract and flatten features
+def extract_and_flatten_features(df, candle):
     if candle < 14:
         return None
     data_window = df.iloc[candle-14:candle]
@@ -300,9 +250,9 @@ def extract_and_flatten_features(candle, df):
 
 # Detect and label breakouts
 def detect_and_label_breakouts(df):
-    Breakout_indices = []
-    Breakout_confirmed = []
-    Breakout_percentage = []
+    breakout_indices = []
+    breakout_confirmed = []
+    breakout_percentage = []
 
     for index in df.index:
         if df.loc[index, 'Breakout_Type'] in [1, 2]:
@@ -311,56 +261,45 @@ def detect_and_label_breakouts(df):
                 confirmation_label, variation = result
                 df.at[index, 'Breakout_Confirmed'] = confirmation_label
                 df.at[index, 'Price_Variation_Percentage'] = variation
-                Breakout_indices.append(index)
-                Breakout_confirmed.append(confirmation_label)
-                Breakout_percentage.append(variation)
+                breakout_indices.append(index)
+                breakout_confirmed.append(confirmation_label)
+                breakout_percentage.append(variation)
     return df
 
-def train_and_save_model(conn, schema, table_name):
-    query = f'SELECT * FROM {schema}.{table_name}_FEATURES'
-    df = pd.read_sql(query, conn)
-    
-    # Préparer les données pour l'entraînement
-    features = df.drop(columns=['Date'])
-    labels = df['Breakout_Type']
-    
-    X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.2, random_state=42, stratify=labels)
+# Fonction d'entraînement et d'enregistrement du modèle sur la VM
+def train_and_save_model(df, table_name):
+    df = calculate_all_indicators(df)
+    df['SAR_Reversals'] = calculate_pivot_reversals(df)
+    df = detect_breakouts(df)
+    df = detect_and_label_breakouts(df)
+    breakout_indices = df[df['Breakout_Confirmed'].notna()].index
+    features = []
+    labels = []
+    for index in breakout_indices:
+        flat_features = extract_and_flatten_features(df, index)
+        if flat_features is not None:
+            features.append(flat_features)
+            labels.append(df.loc[index, 'Breakout_Confirmed'])
+    if not features:
+        print(f"No valid data to train for {table_name}")
+        return
+    X, y = np.array(features), np.array(labels)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
-    
     model = RandomForestClassifier(n_estimators=800, max_depth=10, random_state=42, n_jobs=1)
     model.fit(X_train_scaled, y_train)
     y_pred = model.predict(X_test_scaled)
-    
     accuracy = accuracy_score(y_test, y_pred)
     report = classification_report(y_test, y_pred, zero_division=0)
     print(f"Accuracy on test data for {table_name}: {accuracy}")
     print(f"Classification Report for {table_name}:\n{report}")
-    
     model_filename = f"{table_name}_model.pkl"
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
 
-
-
-
-def predict_with_model(conn, schema, table_name, model_filename):
-    model = joblib.load(model_filename)
-    query = f'SELECT * FROM {schema}.{table_name}_FEATURES ORDER BY Date DESC LIMIT 1'
-    df_today = pd.read_sql(query, conn)
-    
-    features_today = df_today.drop(columns=['Date'])
-    scaler = StandardScaler()
-    features_scaled = scaler.fit_transform(features_today)
-    
-    prediction = model.predict(features_scaled)
-    if prediction[0] in ['VH', 'VB']:
-        send_telegram_message(f"Breakout detected for AAPL: {prediction[0]}")
-
-
 def main():
-    # Connexion à Snowflake
     SP500_CONN = {
         'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
         'user': 'AELHAJJAMI',
@@ -381,26 +320,22 @@ def main():
     )
     print('[MAIN] : Connected to Snowflake for SP500 data.')
 
-    symbol = 'AAL'
+    symbol = 'AAPL'
     table_name = f'ohlcv_data_{symbol}'.upper()
+    
+    start_date = get_last_date(conn, SP500_CONN['schema'], table_name)
+    end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
+    data = download_sp500_data(symbol, start_date, end_date)
 
-    # Télécharger et charger les données OHLCV dans Snowflake
-    # start_date = '2010-01-01'
-    # end_date = '2023-12-31'
-    # df = download_sp500_data(symbol, start_date, end_date)
-    # load_data_to_snowflake(conn, df, SP500_CONN['schema'], table_name)
+    if not data.empty:
+        success, nchunks, nrows = load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
+        print(f"Data loaded to Snowflake: {success}, {nchunks}, {nrows} rows")
 
-    # Calculer et stocker les features dans Snowflake
+    query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
+    df = pd.read_sql(query, conn)
+
     calculate_and_save_features(conn, SP500_CONN['schema'], table_name)
-
-    # Entraîner et sauvegarder le modèle
-    train_and_save_model(conn, SP500_CONN['schema'], table_name)
-
-    # Faire une prédiction avec le modèle
-    model_filename = f"{table_name}_model.pkl"
-    predict_with_model(conn, SP500_CONN['schema'], table_name, model_filename)
-
-    conn.close()
+    train_and_save_model(df, table_name)
 
 if __name__ == "__main__":
     main()
