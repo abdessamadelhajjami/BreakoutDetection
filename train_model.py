@@ -252,7 +252,7 @@ def detect_and_label_breakouts(df):
     return df
 
 
-    def confirm_breakout(df, confirmation_candles=5, threshold_percentage=2):
+def confirm_breakout(df, confirmation_candles=5, threshold_percentage=2):
     Breakout_indices = []
     Breakout_confirmed = []
     Breakout_percentage = []
