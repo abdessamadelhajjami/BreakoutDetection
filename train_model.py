@@ -251,19 +251,64 @@ def detect_and_label_breakouts(df):
                 Breakout_percentage.append(variation)
     return df
 
-from sqlalchemy import create_engine
 
-# Correction de la fonction `train_and_save_model` pour utiliser SQLAlchemy
+    def confirm_breakout(df, confirmation_candles=5, threshold_percentage=2):
+    Breakout_indices = []
+    Breakout_confirmed = []
+    Breakout_percentage = []
+
+    for index in df.index:
+        if df.loc[index, 'Breakout_Type'] in [1, 2]:
+            if index + confirmation_candles >= len(df):
+                continue
+
+            breakout_type = df.loc[index, 'Breakout_Type']
+            breakout_price = df.loc[index, 'Intercept']
+            last_confirmed_price = df.iloc[index + confirmation_candles]['Close']
+            price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
+
+            if breakout_type == 1:
+                if price_variation_percentage <= -threshold_percentage:
+                    confirmation_label = 'VB'
+                else:
+                    confirmation_label = 'FB'
+            elif breakout_type == 2:
+                if price_variation_percentage >= threshold_percentage:
+                    confirmation_label = 'VH'
+                else:
+                    confirmation_label = 'FH'
+            
+            df.at[index, 'Breakout_Confirmed'] = confirmation_label
+            df.at[index, 'Price_Variation_Percentage'] = price_variation_percentage
+            Breakout_indices.append(index)
+            Breakout_confirmed.append(confirmation_label)
+            Breakout_percentage.append(price_variation_percentage)
+    
+    return df, Breakout_indices, Breakout_confirmed
+
+
+
+from sqlalchemy import create_engine
+from sklearn.impute import SimpleImputer
+
 def train_and_save_model(engine, table_name):
     df = pd.read_sql(f'SELECT * FROM {table_name}', engine)
+    print(f"Data from {table_name}:")
+    print(df.head())
+
     df = calculate_all_indicators(df)
+    print("Indicators calculated.")
+    print(df.head())
+
     df['SAR_Reversals'] = calculate_pivot_reversals(df)
     results = [isBreakOut(df, i) for i in range(len(df))]
     df['Breakout_Type'] = [r[0] for r in results]
     df['Slope'] = [r[1] for r in results]
     df['Intercept'] = [r[2] for r in results]
-    df = detect_and_label_breakouts(df)
-    Breakout_indices = df[df['Breakout_Confirmed'].notna()].index
+    
+    # Utiliser confirm_breakout pour étiqueter les breakouts et préparer les données
+    df, Breakout_indices, Breakout_confirmed = confirm_breakout(df)
+    
     features = []
     labels = []
     for index in Breakout_indices:
@@ -297,25 +342,8 @@ def train_and_save_model(engine, table_name):
     print(f"Model saved as {model_filename}")
 
 
-def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
-    if breakout_index + confirmation_candles >= len(df):
-        return None, None  
 
-    breakout_type = df.loc[breakout_index, 'Breakout_Type']
-    breakout_price = df.loc[breakout_index, 'Intercept'] 
-    last_confirmed_price = df.iloc[breakout_index + confirmation_candles]['Close']
-    price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
 
-    if breakout_type == 1:  
-        if price_variation_percentage <= -threshold_percentage:
-            return 'VB', price_variation_percentage  #  (Vrai Baissier)
-        else:
-            return 'FB', price_variation_percentage  #  (Faux Baissier)
-    elif breakout_type == 2:  
-        if price_variation_percentage >= threshold_percentage:
-            return 'VH', price_variation_percentage  
-        else:
-            return 'FH', price_variation_percentage 
 
 def main():
     SP500_CONN = {
@@ -379,4 +407,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
