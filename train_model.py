@@ -109,7 +109,7 @@ def calculate_pivot_reversals(df, window=3):
             pivot_series[candle] = 2
         elif pivotLow:
             pivot_series[candle] = 1
-    df['SAR_Reversals'] = pivot_series
+    df['SAR_Reversals'] = pivot_series[candle]
     return df
 
 def calculate_and_save_pivot_reversals(conn, schema, table_name):
