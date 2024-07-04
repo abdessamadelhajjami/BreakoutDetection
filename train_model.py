@@ -373,7 +373,7 @@ def main():
     )
     print('[MAIN] : Connected to Snowflake for SP500 data.')
 
-    symbol = 'AAPL'
+    symbol = 'AAL'
     table_name = f'ohlcv_data_{symbol}'.upper()
 
     # Télécharger et charger les données OHLCV dans Snowflake
