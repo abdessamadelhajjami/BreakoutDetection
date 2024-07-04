@@ -92,7 +92,7 @@ def load_data_to_snowflake(conn, df, schema, table_name):
     success, nchunks, nrows, _ = write_pandas(conn, df, table_name.upper())
     return success, nchunks, nrows
 
-# 2. Calculer les points pivots et les ajouter à la base de données.
+
 def calculate_pivot_reversals(df, window=3):
     pivot_series = pd.Series([0]*len(df), index=df.index)
     for candle in range(window, len(df) - window):
@@ -111,6 +111,15 @@ def calculate_pivot_reversals(df, window=3):
             pivot_series[candle] = 1
     df['SAR_Reversals'] = pivot_series
     return df
+
+def calculate_and_save_pivot_reversals(conn, schema, table_name):
+    query = f'SELECT * FROM {schema}.{table_name}'
+    df = pd.read_sql(query, conn)
+
+    df = calculate_pivot_reversals(df)
+
+    success, nchunks, nrows, _ = write_pandas(conn, df, table_name.upper())
+    return success, nchunks, nrows
 
 # 3. Détecter les breakouts et ajouter les colonnes slope, intercept, et breakout_type à la base de données.
 def collect_channel(df, candle, backcandles, window=1):
