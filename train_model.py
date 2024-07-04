@@ -6,6 +6,8 @@ import snowflake.connector
 from snowflake.snowpark import Session
 from snowflake.connector.pandas_tools import write_pandas
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.impute import SimpleImputer
+
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
 from sklearn.preprocessing import StandardScaler
@@ -308,7 +310,13 @@ def train_and_save_model(session, table_name):
     if not features:
         print(f"No valid data to train for {table_name}")
         return
+
     X, y = np.array(features), np.array(labels)
+    
+    # Imputer les valeurs manquantes
+    imputer = SimpleImputer(strategy='mean')
+    X = imputer.fit_transform(X)
+    
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
@@ -337,47 +345,62 @@ def send_telegram_message(message):
 
 # Main function
 def main():
-    connection_parameters = {
-        'account': SNOWFLAKE_CONN['account'],
-        'user': SNOWFLAKE_CONN['user'],
-        'password': SNOWFLAKE_CONN['password'],
-        'warehouse': SNOWFLAKE_CONN['warehouse'],
-        'database': SNOWFLAKE_CONN['database'],
-        'schema': SNOWFLAKE_CONN['schema']
+    SP500_CONN = {
+        'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
+        'user': 'AELHAJJAMI',
+        'password': 'Abdou3012',
+        'warehouse': 'COMPUTE_WH',
+        'database': 'BREAKOUDETECTIONDB',
+        'schema': 'SP500',
     }
-    session = Session.builder.configs(connection_parameters).create()
-    # symbols = get_sp500_components()
-    # end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
 
-    # for symbol in symbols:
-    #     table_name = f'ohlcv_data_{symbol}'.upper()
-    #     conn = snowflake.connector.connect(
-    #         user=SNOWFLAKE_CONN['user'],
-    #         password=SNOWFLAKE_CONN['password'],
-    #         account=SNOWFLAKE_CONN['account'],
-    #         warehouse=SNOWFLAKE_CONN['warehouse'],
-    #         database=SNOWFLAKE_CONN['database'],
-    #         schema=SNOWFLAKE_CONN['schema']
-    #     )
-    #     last_date = get_last_date(conn, table_name)
-    #     conn.close()
-    #     data = download_sp500_data(symbol, last_date, end_date)
-    #     if not data.empty:
-    #         load_data_to_snowflake(data, table_name)
+    print('[MAIN] : Connecting to Snowflake for SP500 data...')
+    conn = snowflake.connector.connect(
+        user=SP500_CONN['user'],
+        password=SP500_CONN['password'],
+        account=SP500_CONN['account'],
+        warehouse=SP500_CONN['warehouse'],
+        database=SP500_CONN['database'],
+        schema=SP500_CONN['schema']
+    )
+    print('[MAIN] : Connected to Snowflake for SP500 data.')
 
     symbol = 'AAPL'
     table_name = f'ohlcv_data_{symbol}'.upper()
-    tables = session.sql(f"SELECT DISTINCT table_name FROM information_schema.tables WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'").collect()
+    last_date = get_last_date(conn, SP500_CONN['schema'], table_name)
+    data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
+    
+    # Charger les données dans Snowflake
+    # load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
 
-    for table in tables:
-        train_and_save_model(session, table['TABLE_NAME'])
-        # Check for VH or VB
-        df = session.table(table['TABLE_NAME']).to_pandas()
-        vh_vb = df[(df['Breakout_Confirmed'] == 'VH') | (df['Breakout_Confirmed'] == 'VB')]
-        for _, row in vh_vb.iterrows():
-            message = f"A True Bullish/Bearish breakout detected today for the action {table['TABLE_NAME']}: {row['Breakout_Confirmed']} on {row['Date']}"
+    query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
+    df = pd.read_sql(query, conn)
+    print("Start training the model")
+    train_and_save_model(conn, table_name)
+
+    # Simulation de prédiction avec le modèle
+    print('[MAIN] : Predicting with model...')
+    today_idx = df.index[-1]
+    breakout_type, slope, intercept = isBreakOut(df, today_idx)
+    if breakout_type > 0:
+        print("Breakout detected!")
+        features = extract_and_flatten_features(today_idx, df)
+        if features.size == 0:
+            return
+
+        model_filename = f"{table_name}_model.pkl"
+        model = joblib.load(model_filename)
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features.reshape(1, -1))
+        prediction = model.predict(features_scaled)
+        if prediction[0] in ['VH', 'VB']:
+            message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
             send_telegram_message(message)
-    session.close()
+    else:
+        print("No breakout detected.")
+    print("Finish.")
+    conn.close()
 
 if __name__ == "__main__":
     main()
+
