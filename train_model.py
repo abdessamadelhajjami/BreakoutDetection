@@ -169,13 +169,19 @@ def detect_breakouts(df):
     df['Intercept'] = [r[2] for r in results]
     return df
 
-def update_table_with_calculated_values(conn, schema, table_name):
+
+  def update_table_with_calculated_values(conn, schema, table_name):
     query = f'SELECT * FROM {schema}.{table_name}'
     df = pd.read_sql(query, conn)
     print(f"Loaded data from {schema}.{table_name}")
     print(df.head())  # Imprime les premières lignes pour vérifier
 
-    df['SAR_Reversals'] = calculate_pivot_reversals(df)
+    # Vérifiez la longueur des données retournées
+    sar_reversals = calculate_pivot_reversals(df)
+    if len(sar_reversals) != len(df):
+        raise ValueError("Length of SAR_Reversals does not match length of DataFrame")
+
+    df['SAR_Reversals'] = sar_reversals
     results = [isBreakOut(df, i) for i in range(len(df))]
     df['Breakout_Type'] = [r[0] for r in results]
     df['Slope'] = [r[1] for r in results]
@@ -191,7 +197,6 @@ def update_table_with_calculated_values(conn, schema, table_name):
         """, (row['SAR_Reversals'], row['Breakout_Type'], row['Slope'], row['Intercept'], row['Date']))
         cursor.close()
     print(f"Updated {schema}.{table_name} with calculated values")
-
 
 
 def calculate_sma(df, periods):
@@ -363,13 +368,14 @@ def main():
     )
     print('[MAIN] : Connected to Snowflake for SP500 data.')
 
-    symbol = 'AAL'
+    symbol = 'AAPL'
     table_name = f'ohlcv_data_{symbol}'.upper()
     
- 
+    # Ajouter des colonnes à la table
+    add_columns_to_table(conn, SP500_CONN['schema'], table_name)
 
     # Télécharger les données OHLCV
-    start_date =  pd.Timestamp.today().strftime('%Y-%m-%d')
+    start_date = get_last_date(conn, SP500_CONN['schema'], table_name)
     end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
     data = download_sp500_data(symbol, start_date, end_date)
 
