@@ -279,43 +279,33 @@ def detect_and_label_breakouts(df):
                 Breakout_percentage.append(variation)
     return df
 
-# Fonction d'entraînement et d'enregistrement du modèle sur la VM
-def train_and_save_model(df, table_name):
-    df = calculate_all_indicators(df)
-    df['SAR_Reversals'] = calculate_pivot_reversals(df)
-    results = [isBreakOut(df, i) for i in range(len(df))]
-    df['Breakout_Type'] = [r[0] for r in results]
-    df['Slope'] = [r[1] for r in results]
-    df['Intercept'] = [r[2] for r in results]
-    df = detect_and_label_breakouts(df)
-    Breakout_indices = df[df['Breakout_Confirmed'].notna()].index
-    features = []
-    labels = []
-    for index in Breakout_indices:
-        flat_features = extract_and_flatten_features(df, index)
-        if flat_features is not None:
-            features.append(flat_features)
-            labels.append(df.loc[index, 'Breakout_Confirmed'])
-    if not features:
-        print(f"No valid data to train for {table_name}")
-        return
-    X, y = np.array(features), np.array(labels)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+def train_and_save_model(conn, schema, table_name):
+    query = f'SELECT * FROM {schema}.{table_name}_FEATURES'
+    df = pd.read_sql(query, conn)
+    
+    # Préparer les données pour l'entraînement
+    features = df.drop(columns=['Date'])
+    labels = df['Breakout_Type']
+    
+    X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.2, random_state=42, stratify=labels)
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
+    
     model = RandomForestClassifier(n_estimators=800, max_depth=10, random_state=42, n_jobs=1)
     model.fit(X_train_scaled, y_train)
     y_pred = model.predict(X_test_scaled)
+    
     accuracy = accuracy_score(y_test, y_pred)
     report = classification_report(y_test, y_pred, zero_division=0)
     print(f"Accuracy on test data for {table_name}: {accuracy}")
     print(f"Classification Report for {table_name}:\n{report}")
+    
     model_filename = f"{table_name}_model.pkl"
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
 
-# Calculer et enregistrer les features
+
 def calculate_and_save_features(conn, schema, table_name):
     query = f'SELECT * FROM {schema}.{table_name}'
     df = pd.read_sql(query, conn)
@@ -327,16 +317,39 @@ def calculate_and_save_features(conn, schema, table_name):
     df['Intercept'] = [r[2] for r in results]
     df = detect_and_label_breakouts(df)
 
+    # Calculer les features
+    features_list = []
+    for index in df.index:
+        features = extract_and_flatten_features(index, df)
+        if features is not None:
+            features_list.append(features)
     
+    features_df = pd.DataFrame(features_list, columns=[
+        "Norm_SMA_7", "Norm_SMA_20", "Norm_SMA_50", "Norm_SMA_200", 
+        "Norm_MACD", "Norm_RSI", "Norm_Bollinger_Width", 
+        "Norm_Volume", "Norm_Keltner_High", "Norm_Keltner_Low", 
+        "Slope", "Intercept", "Breakout_Type"
+    ])
+    features_df['Date'] = df['Date']
 
-    # Enregistrer les données avec les features calculées dans Snowflake
-    create_table_if_not_exists(conn, schema, table_name + '_FEATURES')
-    df.columns = [col.replace(' ', '_') for col in df.columns]
-    df['Date'] = df['Date'].astype(str)
-    success, nchunks, nrows, _ = write_pandas(conn, df, table_name + '_FEATURES')
-    return success, nchunks, nrows
+    load_data_to_snowflake(conn, features_df, schema, table_name + '_FEATURES')
+
+def predict_with_model(conn, schema, table_name, model_filename):
+    model = joblib.load(model_filename)
+    query = f'SELECT * FROM {schema}.{table_name}_FEATURES ORDER BY Date DESC LIMIT 1'
+    df_today = pd.read_sql(query, conn)
+    
+    features_today = df_today.drop(columns=['Date'])
+    scaler = StandardScaler()
+    features_scaled = scaler.fit_transform(features_today)
+    
+    prediction = model.predict(features_scaled)
+    if prediction[0] in ['VH', 'VB']:
+        send_telegram_message(f"Breakout detected for AAPL: {prediction[0]}")
+
 
 def main():
+    # Connexion à Snowflake
     SP500_CONN = {
         'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
         'user': 'AELHAJJAMI',
@@ -360,44 +373,22 @@ def main():
     symbol = 'AAPL'
     table_name = f'ohlcv_data_{symbol}'.upper()
 
-    # Télécharger les données OHLCV de Yahoo Finance si elles n'existent pas dans Snowflake
-    if not table_exists(conn, SP500_CONN['schema'], table_name):
-        start_date = '2010-01-01'
-        end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
-        df = download_sp500_data(symbol, start=start_date, end=end_date)
-        load_data_to_snowflake(conn, df, SP500_CONN['schema'], table_name)
+    # Télécharger et charger les données OHLCV dans Snowflake
+    # start_date = '2010-01-01'
+    # end_date = '2023-12-31'
+    # df = download_sp500_data(symbol, start_date, end_date)
+    # load_data_to_snowflake(conn, df, SP500_CONN['schema'], table_name)
 
-    # Calculer et enregistrer les features dans Snowflake
+    # Calculer et stocker les features dans Snowflake
     calculate_and_save_features(conn, SP500_CONN['schema'], table_name)
 
-    # Entraîner et enregistrer le modèle
-    df = pd.read_sql(f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}_FEATURES', conn)
-    train_and_save_model(df, table_name)
+    # Entraîner et sauvegarder le modèle
+    train_and_save_model(conn, SP500_CONN['schema'], table_name)
 
-    # Vérification quotidienne
-    print('[MAIN] : Checking for breakouts...')
-    today_idx = df.index[-1]
-    breakout_type, slope, intercept = isBreakOut(df, today_idx)
+    # Faire une prédiction avec le modèle
+    model_filename = f"{table_name}_model.pkl"
+    predict_with_model(conn, SP500_CONN['schema'], table_name, model_filename)
 
-    if breakout_type > 0:
-        print("YEPP1")
-        features = extract_and_flatten_features(df, today_idx)
-        if features.size == 0:
-            return
-
-        model_filename = f"{table_name}_model.pkl"
-        model = joblib.load(model_filename)
-        print("YEEP2")
-        scaler = StandardScaler()
-        features_scaled = scaler.fit_transform(features.reshape(1, -1))
-        prediction = model.predict(features_scaled)
-        prediction = ['VB']  # Pour le test, on force la prédiction à 'VB'
-        
-        if prediction[0] in ['VH', 'VB']:
-            print("YEEP3")
-            message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
-            send_telegram_message(message)
-    print("finish")
     conn.close()
 
 if __name__ == "__main__":
