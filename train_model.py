@@ -12,6 +12,7 @@ from sklearn.metrics import accuracy_score, classification_report
 import joblib
 import os
 import warnings
+import datetime 
 
 # Configuration du bot Telegram
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
