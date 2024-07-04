@@ -365,7 +365,8 @@ def main():
     #     if not data.empty:
     #         load_data_to_snowflake(data, table_name)
 
-
+    symbol = 'AAPL'
+    table_name = f'ohlcv_data_{symbol}'.upper()
     tables = session.sql(f"SELECT DISTINCT table_name FROM information_schema.tables WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'").collect()
 
     for table in tables:
