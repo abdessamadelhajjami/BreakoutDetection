@@ -4,13 +4,13 @@ import numpy as np
 from scipy import stats
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
-import requests
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 import joblib
 import os
+import warnings
 
-# Telegram bot configuration
+# Fonction pour envoyer un message sur Telegram
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
 TELEGRAM_CHAT_ID = "-1002197712630"
 
@@ -21,15 +21,13 @@ def send_telegram_message(message):
     )
     print(f"Telegram response: {response.json()}")
 
-def get_sp500_components():
-    df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
-    return df["Symbol"].tolist()
-
+# Fonction pour télécharger les données OHLCV de Yahoo Finance
 def download_sp500_data(symbol, start, end):
     data = yf.download(symbol, start=start, end=end)
     data.reset_index(inplace=True)
     return data
 
+# Fonction pour vérifier l'existence d'une table dans Snowflake
 def table_exists(conn, schema, table_name):
     query = f"""
     SELECT COUNT(*)
@@ -40,6 +38,7 @@ def table_exists(conn, schema, table_name):
     result = conn.cursor().execute(query).fetchone()[0]
     return result > 0
 
+# Fonction pour obtenir la dernière date de données dans Snowflake
 def get_last_date(conn, schema, table_name):
     if not table_exists(conn, schema, table_name):
         return '2010-01-01'
@@ -55,6 +54,7 @@ def get_last_date(conn, schema, table_name):
     else:
         return (last_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
 
+# Fonction pour créer une table dans Snowflake si elle n'existe pas
 def create_table_if_not_exists(conn, schema, table_name):
     cursor = conn.cursor()
     cursor.execute(f"""
@@ -65,34 +65,21 @@ def create_table_if_not_exists(conn, schema, table_name):
             "Low" FLOAT, 
             "Close" FLOAT, 
             "Adj_Close" FLOAT, 
-            "Volume" FLOAT,
-            "SAR_Reversals" FLOAT,
-            "Breakout_Type" FLOAT,
-            "Slope" FLOAT,
-            "Intercept" FLOAT,
-            "Breakout_Confirmed" STRING,
-            "Norm_SMA_7" FLOAT,
-            "Norm_SMA_20" FLOAT,
-            "Norm_SMA_50" FLOAT,
-            "Norm_SMA_200" FLOAT,
-            "Norm_MACD" FLOAT,
-            "Norm_RSI" FLOAT,
-            "Norm_Bollinger_Width" FLOAT,
-            "Norm_Volume" FLOAT,
-            "Norm_Keltner_High" FLOAT,
-            "Norm_Keltner_Low" FLOAT
+            "Volume" FLOAT
         )
     """)
     cursor.close()
 
+# Fonction pour charger les données dans Snowflake
 def load_data_to_snowflake(conn, df, schema, table_name):
     create_table_if_not_exists(conn, schema, table_name)
+    df.reset_index(inplace=True)
     df.columns = [col.replace(' ', '_') for col in df.columns]
     df['Date'] = df['Date'].astype(str)
     success, nchunks, nrows, _ = write_pandas(conn, df, table_name.upper())
     return success, nchunks, nrows
 
-
+# Calcul des points pivots
 def calculate_pivot_reversals(df, window=3):
     pivot_series = pd.Series([0]*len(df), index=df.index)
     for candle in range(window, len(df) - window):
@@ -109,14 +96,13 @@ def calculate_pivot_reversals(df, window=3):
             pivot_series[candle] = 2
         elif pivotLow:
             pivot_series[candle] = 1
-    
     return pivot_series
 
-
+# Collecte des données de canaux
 def collect_channel(df, candle, backcandles, window=1):
     localdf = df[candle-backcandles-window:candle-window]
-    highs, idxhighs = localdf[localdf['SAR_Reversals'] == 1].High.values, localdf[localdf['SAR_Reversals'] == 1].High.index
-    lows, idxlows = localdf[localdf['SAR_Reversals'] == 2].Low.values, localdf[localdf['SAR_Reversals'] == 2].Low.index
+    highs, idxhighs = localdf[localdf['SAR Reversals'] == 1].High.values, localdf[localdf['SAR Reversals'] == 1].High.index
+    lows, idxlows = localdf[localdf['SAR Reversals'] == 2].Low.values, localdf[localdf['SAR Reversals'] == 2].Low.index
     if len(lows) >= 2 and len(highs) >= 2:
         sl_lows, interc_lows, sl_highs, interc_highs, _, _ = stats.linregress(idxhighs, highs)
         sl_highs, interc_highs, _, _, _ = stats.linregress(idxlows, lows)
@@ -124,6 +110,7 @@ def collect_channel(df, candle, backcandles, window=1):
     else:
         return 0, 0, 0, 0, 0, 0
 
+# Vérification de la croisement de la ligne
 def line_crosses_candles(data, slope, intercept, start_index, end_index):
     body_crosses = 0
     for i in range(start_index, end_index + 1):
@@ -135,6 +122,7 @@ def line_crosses_candles(data, slope, intercept, start_index, end_index):
             body_crosses += 1
     return body_crosses > 1
 
+# Détection des breakouts
 def isBreakOut(df, candle, window=1):
     for backcandles in [14, 20, 40, 60]:  
         if (candle - backcandles - window) < 0:
@@ -162,15 +150,7 @@ def isBreakOut(df, candle, window=1):
             return 1, sl_lows, interc_lows
     return 0, None, None
 
-def detect_breakouts(df):
-    results = [isBreakOut(df, i) for i in range(len(df))]
-    df['Breakout_Type'] = [r[0] for r in results]
-    df['Slope'] = [r[1] for r in results]
-    df['Intercept'] = [r[2] for r in results]
-    return df
-
-
- 
+# Calcul des indicateurs techniques
 def calculate_sma(df, periods):
     for period in periods:
         sma_key = f'SMA_{period}'
@@ -217,7 +197,7 @@ def calculate_keltner_channel(df, ema_period=20, atr_period=20, multiplier=2):
     df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']
     return df
 
-# Calculate indicators
+# Calcul de tous les indicateurs techniques
 def calculate_all_indicators(df):
     df = calculate_sma(df, [7, 20, 50, 200])
     df = calculate_macd(df)
@@ -227,8 +207,8 @@ def calculate_all_indicators(df):
     df = calculate_keltner_channel(df)
     return df
 
-# Extract and flatten features
-def extract_and_flatten_features(df, candle):
+# Extraction et aplatissement des features
+def extract_and_flatten_features(candle, df):
     if candle < 14:
         return None
     data_window = df.iloc[candle-14:candle]
@@ -244,7 +224,7 @@ def extract_and_flatten_features(df, candle):
     normalized_data['Norm_Keltner_Low'] = (data_window['Keltner_Low'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
     normalized_data['Slope'] = df['Slope'].iloc[candle]
     normalized_data['Intercept'] = df['Intercept'].iloc[candle]
-    normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
+    normalized_data['Breakout_Type'] = df['Breakout Type'].iloc[candle]
     flattened_features = normalized_data.values.flatten().tolist()
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
@@ -256,7 +236,7 @@ def detect_and_label_breakouts(df):
     Breakout_percentage = []
 
     for index in df.index:
-        if df.loc[index, 'Breakout_Type'] in [1, 2]:
+        if df.loc[index, 'Breakout Type'] in [1, 2]:
             result = confirm_breakout(df, index)
             if result:
                 confirmation_label, variation = result
@@ -270,11 +250,11 @@ def detect_and_label_breakouts(df):
 # Fonction d'entraînement et d'enregistrement du modèle sur la VM
 def train_and_save_model(df, table_name):
     df = calculate_all_indicators(df)
-    df['SAR_Reversals'] = calculate_pivot_reversals(df)
+    df['SAR Reversals'] = calculate_pivot_reversals(df)
     results = [isBreakOut(df, i) for i in range(len(df))]
-    df['Breakout_Type'] = [r[0] for r in results]
-    df['Slope'] = [r[1] for r in results]
-    df['Intercept'] = [r[2] for r in results]
+    df['Breakout Type'] = [r[0] for r in results]
+    df['Slope'] = [r[1] for r[2]]
+    df['Intercept'] = [r[2] for r[2]]
     df = detect_and_label_breakouts(df)
     Breakout_indices = df[df['Breakout_Confirmed'].notna()].index
     features = []
@@ -326,28 +306,37 @@ def main():
 
     symbol = 'AAPL'
     table_name = f'ohlcv_data_{symbol}'.upper()
+    last_date = get_last_date(conn, SP500_CONN['schema'], table_name)
+    data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
+    load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
 
-    # Télécharger les données de Yahoo Finance et les sauvegarder sur Snowflake
-    start_date = '2010-01-01'
-    end_date = pd.Timestamp.today().strftime('%Y-%m-%d')
-    df = download_sp500_data(symbol, start_date, end_date)
-    # load_data_to_snowflake(conn, df, SP500_CONN['schema'], table_name)
+    query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
+    df = pd.read_sql(query, conn)
 
-    # Calculer et sauvegarder les features
-    calculate_and_save_features(conn, SP500_CONN['schema'], table_name)
+    train_and_save_model(df, table_name)
 
-    # Télécharger les données avec les features ajoutées
-    query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}_FEATURES'
-    df_with_features = pd.read_sql(query, conn)
+    # Simulation de prédiction avec le modèle
+    print('[MAIN] : Predicting with model...')
+    today_idx = df.index[-1]
+    breakout_type, slope, intercept = isBreakOut(df, today_idx)
+    if breakout_type > 0:
+        print("Breakout detected!")
+        features = extract_and_flatten_features(today_idx, df)
+        if features.size == 0:
+            return
 
-    # Entraîner le modèle et sauvegarder localement
-    train_and_save_model(df_with_features, table_name)
-
+        model_filename = f"{table_name}_model.pkl"
+        model = joblib.load(model_filename)
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features.reshape(1, -1))
+        prediction = model.predict(features_scaled)
+        if prediction[0] in ['VH', 'VB']:
+            message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
+            send_telegram_message(message)
+    else:
+        print("No breakout detected.")
+    print("Finish.")
     conn.close()
 
 if __name__ == "__main__":
     main()
-
-    
-
-
