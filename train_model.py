@@ -211,7 +211,6 @@ def calculate_all_indicators(df):
     df = calculate_keltner_channel(df)
     return df
 
-# Extraction et aplatissement des features
 def extract_and_flatten_features(candle, df):
     if candle < 14:
         return None
@@ -228,19 +227,18 @@ def extract_and_flatten_features(candle, df):
     normalized_data['Norm_Keltner_Low'] = (data_window['Keltner_Low'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
     normalized_data['Slope'] = df['Slope'].iloc[candle]
     normalized_data['Intercept'] = df['Intercept'].iloc[candle]
-    normalized_data['Breakout_Type'] = df['Breakout Type'].iloc[candle]
+    normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
     flattened_features = normalized_data.values.flatten().tolist()
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
 
-# Détection et étiquetage des breakouts
 def detect_and_label_breakouts(df):
     Breakout_indices = []
     Breakout_confirmed = []
     Breakout_percentage = []
 
     for index in df.index:
-        if df.loc[index, 'Breakout Type'] in [1, 2]:
+        if df.loc[index, 'Breakout_Type'] in [1, 2]:
             result = confirm_breakout(df, index)
             if result:
                 confirmation_label, variation = result
@@ -252,39 +250,24 @@ def detect_and_label_breakouts(df):
     return df
 
 # Fonction d'entraînement et d'enregistrement du modèle sur la VM
-# Fonction d'entraînement et d'enregistrement du modèle sur la VM
 def train_and_save_model(df, table_name):
+    print("Start training the model")
     df = calculate_all_indicators(df)
-    df['SAR Reversals'] = calculate_pivot_reversals(df)
+    df['SAR_Reversals'] = calculate_pivot_reversals(df)
     results = [isBreakOut(df, i) for i in range(len(df))]
-    df['Breakout Type'] = [r[0] for r in results]
+    df['Breakout_Type'] = [r[0] for r in results]
     df['Slope'] = [r[1] for r in results]
     df['Intercept'] = [r[2] for r in results]
-
-    # Ajout des colonnes de confirmation des breakouts
-    Breakout_indices = []
-    Breakout_confirmed = []
-    Breakout_percentage = []
+    df = detect_and_label_breakouts(df)
     
-    for index in df.index:
-        if df.loc[index, 'Breakout Type'] in [1, 2]:  
-            result = confirm_breakout(df, index)
-            if result:  
-                confirmation_label, variation = result
-                df.at[index, 'Breakout Confirmed'] = confirmation_label
-                df.at[index, 'Price Variation %'] = variation
-                
-                Breakout_indices.append(index)
-                Breakout_confirmed.append(confirmation_label)
-                Breakout_percentage.append(variation)
-
+    Breakout_indices = df[df['Breakout_Confirmed'].notna()].index
     features = []
     labels = []
     for index in Breakout_indices:
         flat_features = extract_and_flatten_features(index, df)
         if flat_features is not None:
             features.append(flat_features)
-            labels.append(df.loc[index, 'Breakout Confirmed'])
+            labels.append(df.loc[index, 'Breakout_Confirmed'])
     
     if not features:
         print(f"No valid data to train for {table_name}")
@@ -306,12 +289,12 @@ def train_and_save_model(df, table_name):
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
 
-# Fonction pour confirmer les breakouts
+
 def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
     if breakout_index + confirmation_candles >= len(df):
         return None, None  
 
-    breakout_type = df.loc[breakout_index, 'Breakout Type']
+    breakout_type = df.loc[breakout_index, 'Breakout_Type']
     breakout_price = df.loc[breakout_index, 'Intercept'] 
     last_confirmed_price = df.iloc[breakout_index + confirmation_candles]['Close']
     price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
@@ -326,7 +309,6 @@ def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_perce
             return 'VH', price_variation_percentage  
         else:
             return 'FH', price_variation_percentage 
-
 
 def main():
     SP500_CONN = {
