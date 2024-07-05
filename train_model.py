@@ -127,6 +127,7 @@ def calculate_keltner_channel(df, ema_period=20, atr_period=20, multiplier=2):
     df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']
     return df
 
+
 def calculate_all_indicators(df):
     df = calculate_sma(df, [7, 20, 50, 200])
     df = calculate_macd(df)
@@ -134,8 +135,10 @@ def calculate_all_indicators(df):
     df = calculate_bbands(df)
     df = calculate_volume_ma(df)
     df = calculate_keltner_channel(df)
-    df.fillna(0, inplace=True)  # Handling NaN values by filling them with 0
+    # Remplacer les valeurs NaN par la moyenne de la colonne
+    df = df.apply(lambda x: x.fillna(x.mean()), axis=0)
     return df
+
 
 def calculate_pivot_reversals(df, window=3):
     pivot_series = pd.Series([0]*len(df), index=df.index)
@@ -221,10 +224,12 @@ def extract_and_flatten_features(candle, df):
     normalized_data['Slope'] = df['Slope'].iloc[candle]
     normalized_data['Intercept'] = df['Intercept'].iloc[candle]
     normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
-    normalized_data.fillna(0, inplace=True)  # Handling NaN values by filling them with 0
+    # Remplacer les valeurs NaN par la moyenne de la colonne
+    normalized_data = normalized_data.apply(lambda x: x.fillna(x.mean()), axis=0)
     flattened_features = normalized_data.values.flatten().tolist()
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
+
 
 def detect_and_label_breakouts(df):
     Breakout_indices = []
