@@ -461,49 +461,51 @@ def main():
         schema=SNOWFLAKE_CONN['schema']
     )
 
-    symbol = 'MMM'
-    table_name = f'ohlcv_data_{symbol}'.upper()
-    last_date = get_last_date(conn, table_name)
-    data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
+    symbols = get_sp500_components()
+    end_date = pd.Timestamp.now().strftime('%Y-%m-%d')
 
-    if not data.empty:
-        load_data_to_snowflake(data, table_name)
+    for symbol in symbols:
+        table_name = f'ohlcv_data_{symbol}'.upper()
+        last_date = get_last_date(conn, table_name)
+        data = download_sp500_data(symbol, last_date, end_date)
 
-    print("Loaded data:")
-    print(data.head())
+        if not data.empty:
+            load_data_to_snowflake(data, table_name)
 
-    query = f'SELECT * FROM {SNOWFLAKE_CONN["schema"]}.{table_name}'
-    df = pd.read_sql(query, conn)
+        print(f"Loaded data for {symbol}:")
+        print(data.head())
 
-    # Calculer les indicateurs et les SAR
-    df = calculate_all_indicators(df)
-    df['SAR_Reversals'] = calculate_pivot_reversals(df)
+        query = f'SELECT * FROM {SNOWFLAKE_CONN["schema"]}.{table_name}'
+        df = pd.read_sql(query, conn)
 
-    # # Ajouter les colonnes nécessaires pour les breakouts
-    df['Breakout_Type'] = np.nan
-    df['Slope'] = np.nan
-    df['Intercept'] = np.nan
-    # for i in range(len(df)):
-    #     breakout_type, slope, intercept = isBreakOut(df, i)
-    #     df.at[i, 'Breakout_Type'] = breakout_type
-    #     df.at[i, 'Slope'] = slope
-    #     df.at[i, 'Intercept'] = intercept
+        # Calculer les indicateurs et les SAR
+        df = calculate_all_indicators(df)
+        df['SAR_Reversals'] = calculate_pivot_reversals(df)
 
-    # #Détecter et étiqueter les breakouts
-    # df = detect_and_label_breakouts(df)
-    
-    # #Entraîner et sauvegarder le modèle
-    # train_and_save_model(df, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
+        # Ajouter les colonnes nécessaires pour les breakouts
+        df['Breakout_Type'] = np.nan
+        df['Slope'] = np.nan
+        df['Intercept'] = np.nan
+        for i in range(len(df)):
+            breakout_type, slope, intercept = isBreakOut(df, i)
+            df.at[i, 'Breakout_Type'] = breakout_type
+            df.at[i, 'Slope'] = slope
+            df.at[i, 'Intercept'] = intercept
 
-    # Charger le modèle et prédire
-    load_and_predict(df, symbol, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
+        # Détecter et étiqueter les breakouts
+        df = detect_and_label_breakouts(df)
+        
+        # Entraîner et sauvegarder le modèle
+        train_and_save_model(df, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
+
+        # Charger le modèle et prédire
+        load_and_predict(df, symbol, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
 
     conn.close()
     session.close()
 
 if __name__ == "__main__":
     main()
-
 
 
 
