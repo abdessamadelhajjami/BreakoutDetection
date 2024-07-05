@@ -466,7 +466,7 @@ def main():
     #Détecter et étiqueter les breakouts
     df = detect_and_label_breakouts(df)
     
-    Entraîner et sauvegarder le modèle
+    #Entraîner et sauvegarder le modèle
     train_and_save_model(df, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
 
     # Charger le modèle et prédire
