@@ -339,7 +339,8 @@ def train_and_save_model(session, table_name):
     # Conversion finale en tableaux numpy pour les caractéristiques et les labels
     filtred_features = np.array(features)
     filtred_labels = np.array(Breakout_confirmed)
-
+    print ("dans la fonction train and save, filtred-features est", filtred_features)
+    print ("dans la fonction train and save, filtred-lbels est", filtred_labels)
     # Préparation des caractéristiques et des étiquettes pour l'entraînement
     X = filtred_features
     y = filtred_labels
