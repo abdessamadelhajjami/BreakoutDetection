@@ -429,17 +429,17 @@ def main():
     df['SAR_Reversals'] = calculate_pivot_reversals(df)
 
     # Ajouter les colonnes nécessaires pour les breakouts
-    # df['Breakout_Type'] = np.nan
-    # df['Slope'] = np.nan
-    # df['Intercept'] = np.nan
-    # for i in range(len(df)):
-    #     breakout_type, slope, intercept = isBreakOut(df, i)
-    #     df.at[i, 'Breakout_Type'] = breakout_type
-    #     df.at[i, 'Slope'] = slope
-    #     df.at[i, 'Intercept'] = intercept
+    df['Breakout_Type'] = np.nan
+    df['Slope'] = np.nan
+    df['Intercept'] = np.nan
+    for i in range(len(df)):
+        breakout_type, slope, intercept = isBreakOut(df, i)
+        df.at[i, 'Breakout_Type'] = breakout_type
+        df.at[i, 'Slope'] = slope
+        df.at[i, 'Intercept'] = intercept
 
-    # # Détecter et étiqueter les breakouts
-    # df = detect_and_label_breakouts(df)
+    # Détecter et étiqueter les breakouts
+    df = detect_and_label_breakouts(df)
     
     # Entraîner et sauvegarder le modèle
     #train_and_save_model(df, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
