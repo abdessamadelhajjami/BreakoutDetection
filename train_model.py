@@ -278,6 +278,7 @@ def extract_and_flatten_features(candle, df):
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
 
+
 # Detect and label breakouts
 def detect_and_label_breakouts(df):
     Breakout_indices = []
@@ -294,10 +295,10 @@ def detect_and_label_breakouts(df):
                 Breakout_indices.append(index)
                 Breakout_confirmed.append(confirmation_label)
                 Breakout_percentage.append(variation)
-    return df
+    
+    return df, Breakout_indices, Breakout_confirmed
 
-from sklearn.experimental import enable_hist_gradient_boosting
-from sklearn.ensemble import HistGradientBoostingClassifier
+
 
 # Train and save the model
 def train_and_save_model(session, table_name):
@@ -337,19 +338,20 @@ def train_and_save_model(session, table_name):
     X = filtred_features
     y = filtred_labels
 
-    
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
-    model = RandomForestClassifier(n_estimators=800, max_depth=10, random_state=42, n_jobs=1)
+    
+    model = HistGradientBoostingClassifier(random_state=42)
     model.fit(X_train_scaled, y_train)
     y_pred = model.predict(X_test_scaled)
+    
     accuracy = accuracy_score(y_test, y_pred)
     report = classification_report(y_test, y_pred, zero_division=0)
     # Évaluation des performances du modèle
-    print(f"Accuracy on test data for {table_name}: {accuracy_score(y_test, y_pred)}")
-    print(f"Classification Report for {table_name}:\n{classification_report(y_test, y_pred)}")
+    print(f"Accuracy on test data for {table_name}: {accuracy}")
+    print(f"Classification Report for {table_name}:\n{report}")
 
     model_filename = f"{table_name}_model.pkl"
     joblib.dump(model, model_filename)
