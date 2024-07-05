@@ -257,13 +257,6 @@ def detect_and_label_breakouts(df, confirmation_candles=5, threshold_percentage=
     Breakout_confirmed = []
     Breakout_percentage = []
 
-    # Initialisation des colonnes
-    df['Breakout Type'] = np.nan
-    df['Slope'] = np.nan
-    df['Intercept'] = np.nan
-    df['Breakout Confirmed'] = np.nan
-    df['Price Variation %'] = np.nan
-
     for index in df.index:
         breakout_type, slope, intercept = isBreakOut(df, index)
         if breakout_type == 0:
@@ -298,19 +291,8 @@ def detect_and_label_breakouts(df, confirmation_candles=5, threshold_percentage=
         Breakout_confirmed.append(confirmation_label)
         Breakout_percentage.append(price_variation_percentage)
 
-    # Filtrer pour ne garder que les résultats valides
-    filtered_percentages = [percentage for label, percentage in zip(Breakout_confirmed, Breakout_percentage) if label is not None]
-    filtered_types = [b_type for b_type, label in zip(Breakout_types, Breakout_confirmed) if label is not None]
-    filtered_indices = [index for index, label in zip(Breakout_indices, Breakout_confirmed) if label is not None]
-    filtered_confirmed = [label for label in Breakout_confirmed if label is not None]
-
-    # Mettre à jour les listes avec uniquement les données filtrées
-    Breakout_percentage = filtered_percentages
-    Breakout_types = filtered_types
-    Breakout_indices = filtered_indices
-    Breakout_confirmed = filtered_confirmed
-
     return df, Breakout_indices, Breakout_confirmed
+
 
 
 
@@ -405,7 +387,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
 
