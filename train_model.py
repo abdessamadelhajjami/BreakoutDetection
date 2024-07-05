@@ -374,7 +374,7 @@ def load_and_predict(df, symbol, table_name):
         if features.size == 0:
             return
         imputer = SimpleImputer(strategy='mean')
-        features = imputer.fit_transform(X)
+        features = imputer.fit_transform(features)
         model_filename = f"{table_name}_model.pkl"
         model = joblib.load(model_filename)
         print("model bien chargé<<<<")
