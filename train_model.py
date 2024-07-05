@@ -368,34 +368,55 @@ def train_and_save_model(session, table_name):
 
 
 def main():
-    connection_parameters = {
-        'account': SNOWFLAKE_CONN['account'],
-        'user': SNOWFLAKE_CONN['user'],
-        'password': SNOWFLAKE_CONN['password'],
-        'warehouse': SNOWFLAKE_CONN['warehouse'],
-        'database': SNOWFLAKE_CONN['database'],
-        'schema': SNOWFLAKE_CONN['schema']
-    }
-    session = Session.builder.configs(connection_parameters).create()
-    
-    tables = session.sql(f"SELECT DISTINCT table_name FROM information_schema.tables WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'").collect()
+    conn_str = f'snowflake://{SP500_CONN["user"]}:{SP500_CONN["password"]}@{SP500_CONN["account"]}/{SP500_CONN["database"]}/{SP500_CONN["schema"]}?warehouse={SP500_CONN["warehouse"]}'
+    engine = create_engine(conn_str)
 
-    for table in tables:
-        train_and_save_model(session, table['TABLE_NAME'])
-        # Check for VH or VB
-        df = session.table(table['TABLE_NAME']).to_pandas()
-        vh_vb = df[(df['Breakout_Confirmed'] == 'VH') | (df['Breakout_Confirmed'] == 'VB')]
-        for _, row in vh_vb.iterrows():
-            message = f"A True Bullish/Bearish breakout detected today for the action {table['TABLE_NAME']}: {row['Breakout_Confirmed']} on {row['Date']}"
+    print('[MAIN] : Connecting to Snowflake for SP500 data...')
+    conn = snowflake.connector.connect(
+        user=SP500_CONN['user'],
+        password=SP500_CONN['password'],
+        account=SP500_CONN['account'],
+        warehouse=SP500_CONN['warehouse'],
+        database=SP500_CONN['database'],
+        schema=SP500_CONN['schema']
+    )
+    print('[MAIN] : Connected to Snowflake for SP500 data.')
+
+    symbol = 'AAPL'
+    table_name = f'ohlcv_data_{symbol}'.upper()
+    last_date = get_last_date(conn, SP500_CONN['schema'], table_name)
+    data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
+
+    # load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
+
+    train_and_save_model(engine, f"{SP500_CONN['schema']}.{table_name}")
+
+    print('[MAIN] : Predicting with model...')
+    query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
+    df = pd.read_sql(query, engine)
+    today_idx = df.index[-1]
+    breakout_type, slope, intercept = isBreakOut(df, today_idx)
+    if breakout_type > 0:
+        print("Breakout detected!")
+        features = extract_and_flatten_features(today_idx, df)
+        if features.size == 0:
+            return
+
+        model_filename = f"{table_name}_model.pkl"
+        model = joblib.load(model_filename)
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features.reshape(1, -1))
+        prediction = model.predict(features_scaled)
+        if prediction[0] in ['VH', 'VB']:
+            message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
             send_telegram_message(message)
-    session.close()
+    else:
+        print("No breakout detected.")
+    print("Finish.")
+    conn.close()
 
 if __name__ == "__main__":
     main()
-
-
-
-
 
 
 
