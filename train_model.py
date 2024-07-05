@@ -337,16 +337,16 @@ def train_and_save_model(session, table_name):
     X = filtred_features
     y = filtred_labels
 
-    # Division des données en ensembles d'entraînement et de test
+    
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-
-    # Initialisation et entraînement du modèle HistGradientBoostingClassifier
-    model = RandomForestClassifier(max_iter=100, random_state=42)
-    model.fit(X_train, y_train)
-
-    # Prédiction sur l'ensemble de test
-    y_pred = model.predict(X_test)
-
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    model = RandomForestClassifier(n_estimators=800, max_depth=10, random_state=42, n_jobs=1)
+    model.fit(X_train_scaled, y_train)
+    y_pred = model.predict(X_test_scaled)
+    accuracy = accuracy_score(y_test, y_pred)
+    report = classification_report(y_test, y_pred, zero_division=0)
     # Évaluation des performances du modèle
     print(f"Accuracy on test data for {table_name}: {accuracy_score(y_test, y_pred)}")
     print(f"Classification Report for {table_name}:\n{classification_report(y_test, y_pred)}")
