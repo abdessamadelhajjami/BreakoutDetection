@@ -18,7 +18,7 @@ import os
 
 # Telegram bot configuration
 TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAGCgn6sd4HVOVARI/sendMessage"
-TELEGRAM_CHAT_ID = "https://t.me/Breakout_Channel" 
+TELEGRAM_CHAT_ID = "-1002197712630" 
 
 # Snowflake connection configuration
 SNOWFLAKE_CONN = {
@@ -439,7 +439,7 @@ def main():
         df.at[i, 'Intercept'] = intercept
 
     # Détecter et étiqueter les breakouts
-    df = detect_and_label_breakouts(df)
+    #df = detect_and_label_breakouts(df)
     
     # Entraîner et sauvegarder le modèle
     #train_and_save_model(df, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
