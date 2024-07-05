@@ -315,56 +315,66 @@ def train_and_save_model(session, table_name):
 
     # Calcul des indicateurs
     df = calculate_all_indicators(df)
+    df['SAR_Reversals'] = calculate_pivot_reversals(df)
 
-    print("Indicators calculated.")
+    print("Indicators and SAR Reversals calculated.")
     print(df.head())
 
     # Détection et étiquetage des breakouts
-    df, Breakout_indices, Breakout_confirmed = detect_and_label_breakouts(df)
+    results = [isBreakOut(df, i) for i in range(len(df))]
+    df['Breakout_Type'] = [r[0] for r in results]
+    df['Slope'] = [r[1] for r in results]
+    df['Intercept'] = [r[2] for r in results]
+
+    df = detect_and_label_breakouts(df)
 
     print("Breakouts detected and labeled:")
     print(df[['Date', 'Breakout_Type', 'Slope', 'Intercept', 'Breakout_Confirmed']].head(20))
 
     # Extraction des caractéristiques
     features = []
+    labels = []
+    Breakout_indices = df[df['Breakout_Confirmed'].notna()].index
     for index in Breakout_indices:
         flat_features = extract_and_flatten_features(index, df)
         if flat_features is not None:
             features.append(flat_features)
-    print("features sont::::::::", features)
+            labels.append(df.loc[index, 'Breakout_Confirmed'])
+
     if not features:
         print(f"No valid data to train for {table_name}")
         return
 
-    # Conversion finale en tableaux numpy pour les caractéristiques et les labels
-    filtred_features = np.array(features)
-    filtred_labels = np.array(Breakout_confirmed)
-    print ("dans la fonction train and save, filtred-features est", filtred_features)
-    print ("dans la fonction train and save, filtred-lbels est", filtred_labels)
-    # Préparation des caractéristiques et des étiquettes pour l'entraînement
-    X = filtred_features
-    y = filtred_labels
+    print(f"Extracted features: {features[:5]}")
+    print(f"Labels: {labels[:5]}")
 
+    # Conversion finale en tableaux numpy pour les caractéristiques et les labels
+    X, y = np.array(features), np.array(labels)
+
+    # Préparation des caractéristiques et des étiquettes pour l'entraînement
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+
+    # Normalisation des caractéristiques pour améliorer les performances du modèle
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
-    
-    model = HistGradientBoostingClassifier(random_state=42)
+
+    # Initialisation et entraînement du modèle de forêt aléatoire
+    model = RandomForestClassifier(n_estimators=800, max_depth=10, random_state=42, n_jobs=1)
     model.fit(X_train_scaled, y_train)
+
+    # Prédiction sur l'ensemble de test
     y_pred = model.predict(X_test_scaled)
-    
-    accuracy = accuracy_score(y_test, y_pred)
-    report = classification_report(y_test, y_pred, zero_division=0)
+
     # Évaluation des performances du modèle
-    print(f"Accuracy on test data for {table_name}: {accuracy}")
-    print(f"Classification Report for {table_name}:\n{report}")
+    print(f"Accuracy on test data for {table_name}: {accuracy_score(y_test, y_pred)}")
+    print(f"Classification Report for {table_name}:\n{classification_report(y_test, y_pred)}")
 
     model_filename = f"{table_name}_model.pkl"
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
 
-
+    
 # Send Telegram notification
 def send_telegram_message(message):
     payload = {
@@ -374,6 +384,9 @@ def send_telegram_message(message):
     response = requests.post(TELEGRAM_API_URL, data=payload)
     if response.status_code != 200:
         print(f"Failed to send message: {response.text}")
+
+
+
 
 def main():
     connection_parameters = {
