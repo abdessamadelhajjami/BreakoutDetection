@@ -366,8 +366,7 @@ def send_telegram_message(message):
 
 def load_and_predict(df, symbol, table_name):
     print('[MAIN] : Predicting with model...')
-    query = f'SELECT * FROM {SNOWFLAKE_CONN["schema"]}.{table_name}'
-    df = pd.read_sql(query, conn)
+    
     today_idx = df.index[-1]
     breakout_type, slope, intercept = 1 , 0.24 , 0.12 #isBreakOut(df, today_idx)
     if breakout_type > 0:
