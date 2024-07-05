@@ -285,7 +285,6 @@ def extract_and_flatten_features(candle, df):
     return np.array(flattened_features)
 
 
-# Detect and label breakouts
 def detect_and_label_breakouts(df):
     Breakout_indices = []
     Breakout_confirmed = []
@@ -302,11 +301,9 @@ def detect_and_label_breakouts(df):
                 Breakout_confirmed.append(confirmation_label)
                 Breakout_percentage.append(variation)
     
-    return df, Breakout_indices, Breakout_confirmed
+    return df, Breakout_indices, Breakout_confirmed, Breakout_percentage
 
 
-
-# Train and save the model
 def train_and_save_model(session, table_name):
     df = session.table(table_name).to_pandas()
 
@@ -326,7 +323,7 @@ def train_and_save_model(session, table_name):
     df['Slope'] = [r[1] for r in results]
     df['Intercept'] = [r[2] for r in results]
 
-    df = detect_and_label_breakouts(df)
+    df, Breakout_indices, Breakout_confirmed, Breakout_percentage = detect_and_label_breakouts(df)
 
     print("Breakouts detected and labeled:")
     print(df[['Date', 'Breakout_Type', 'Slope', 'Intercept', 'Breakout_Confirmed']].head(20))
@@ -334,7 +331,6 @@ def train_and_save_model(session, table_name):
     # Extraction des caractéristiques
     features = []
     labels = []
-    Breakout_indices = df[df['Breakout_Confirmed'].notna()].index
     for index in Breakout_indices:
         flat_features = extract_and_flatten_features(index, df)
         if flat_features is not None:
@@ -373,6 +369,7 @@ def train_and_save_model(session, table_name):
     model_filename = f"{table_name}_model.pkl"
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
+
 
     
 # Send Telegram notification
@@ -448,6 +445,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
