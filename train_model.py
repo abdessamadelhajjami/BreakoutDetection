@@ -302,8 +302,7 @@ def detect_and_label_breakouts(df):
                 Breakout_indices.append(index)
                 Breakout_confirmed.append(confirmation_label)
                 Breakout_percentage.append(variation)
-    
-    return df, Breakout_indices, Breakout_confirmed, Breakout_percentage
+    return df
 
 
 def train_and_save_model(df, table_name):
@@ -409,8 +408,7 @@ def main():
         schema=SNOWFLAKE_CONN['schema']
     )
 
-    symbol = 'AMZN'
-    
+    symbol = 'AAPL'
     table_name = f'ohlcv_data_{symbol}'.upper()
     last_date = get_last_date(conn, table_name)
     data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
@@ -428,6 +426,16 @@ def main():
     df = calculate_all_indicators(df)
     df['SAR_Reversals'] = calculate_pivot_reversals(df)
 
+    # Ajouter les colonnes nécessaires pour les breakouts
+    df['Breakout_Type'] = np.nan
+    df['Slope'] = np.nan
+    df['Intercept'] = np.nan
+    for i in range(len(df)):
+        breakout_type, slope, intercept = isBreakOut(df, i)
+        df.at[i, 'Breakout_Type'] = breakout_type
+        df.at[i, 'Slope'] = slope
+        df.at[i, 'Intercept'] = intercept
+
     # Détecter et étiqueter les breakouts
     df = detect_and_label_breakouts(df)
     
@@ -442,6 +450,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
