@@ -432,11 +432,11 @@ def main():
     df['Breakout_Type'] = np.nan
     df['Slope'] = np.nan
     df['Intercept'] = np.nan
-    for i in range(len(df)):
-        breakout_type, slope, intercept = isBreakOut(df, i)
-        df.at[i, 'Breakout_Type'] = breakout_type
-        df.at[i, 'Slope'] = slope
-        df.at[i, 'Intercept'] = intercept
+    # for i in range(len(df)):
+    #     breakout_type, slope, intercept = isBreakOut(df, i)
+    #     df.at[i, 'Breakout_Type'] = breakout_type
+    #     df.at[i, 'Slope'] = slope
+    #     df.at[i, 'Intercept'] = intercept
 
     # Détecter et étiqueter les breakouts
     #df = detect_and_label_breakouts(df)
