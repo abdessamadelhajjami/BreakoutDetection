@@ -419,13 +419,13 @@ def main():
     print("Loaded data:")
     print(data.head())
 
-    train_and_save_model(session, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
+    # train_and_save_model(session, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
 
     print('[MAIN] : Predicting with model...')
     query = f'SELECT * FROM {SNOWFLAKE_CONN["schema"]}.{table_name}'
     df = pd.read_sql(query, conn)
     today_idx = df.index[-1]
-    breakout_type, slope, intercept = isBreakOut(df, today_idx)
+    breakout_type, slope, intercept = 1 , 0.24 , 0.12 #isBreakOut(df, today_idx)
     if breakout_type > 0:
         print("Breakout detected!")
         features = extract_and_flatten_features(today_idx, df)
@@ -437,6 +437,7 @@ def main():
         scaler = StandardScaler()  # Need to ensure scaler is consistent with training
         features_scaled = scaler.fit_transform(features.reshape(1, -1))
         prediction = model.predict(features_scaled)
+        prediction = ['VB']
         if prediction[0] in ['VH', 'VB']:
             message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
             send_telegram_message(message)
