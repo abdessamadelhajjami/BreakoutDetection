@@ -331,7 +331,7 @@ def train_and_save_model(session, table_name):
         flat_features = extract_and_flatten_features(index, df)
         if flat_features is not None:
             features.append(flat_features)
-
+    print("features sont::::::::", features)
     if not features:
         print(f"No valid data to train for {table_name}")
         return
