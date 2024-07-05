@@ -236,63 +236,42 @@ def extract_and_flatten_features(candle, df):
 
 
 
-def detect_and_label_breakouts(df):
+def detect_label_and_prepare_breakouts(df, confirmation_candles=5, threshold_percentage=2):
     Breakout_indices = []
     Breakout_confirmed = []
     Breakout_percentage = []
 
     for index in df.index:
-        if df.loc[index, 'Breakout_Type'] in [1, 2]:
-            result = confirm_breakout(df, index)
-            if result:
-                confirmation_label, variation = result
+        breakout_type = df.loc[index, 'Breakout_Type']
+        if breakout_type in [1, 2]:
+            breakout_price = df.loc[index, 'Intercept']
+            if index + confirmation_candles < len(df):
+                last_confirmed_price = df.iloc[index + confirmation_candles]['Close']
+                price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
+
+                if breakout_type == 1:
+                    if price_variation_percentage <= -threshold_percentage:
+                        confirmation_label = 'VB'
+                    else:
+                        confirmation_label = 'FB'
+                elif breakout_type == 2:
+                    if price_variation_percentage >= threshold_percentage:
+                        confirmation_label = 'VH'
+                    else:
+                        confirmation_label = 'FH'
+
                 df.at[index, 'Breakout_Confirmed'] = confirmation_label
-                df.at[index, 'Price_Variation_Percentage'] = variation
+                df.at[index, 'Price_Variation_Percentage'] = price_variation_percentage
                 Breakout_indices.append(index)
                 Breakout_confirmed.append(confirmation_label)
-                Breakout_percentage.append(variation)
-    return df
+                Breakout_percentage.append(price_variation_percentage)
 
-def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
-    if breakout_index + confirmation_candles >= len(df):
-        return None, None  
+    # Handling NaN values by filling them with the mean of the column
+    # df = df.apply(lambda x: x.fillna(x.mean()), axis=0)
 
-    breakout_type = df.loc[breakout_index, 'Breakout_Type']
-    breakout_price = df.loc[breakout_index, 'Intercept']
-    last_confirmed_price = df.iloc[breakout_index + confirmation_candles]['Close']
-    price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
+    print("Remaining NaN values after handling:")
+    print(df.isna().sum())
 
-    if breakout_type == 1:  
-        if price_variation_percentage <= -threshold_percentage:
-            return 'VB', price_variation_percentage  # (Vrai Baissier)
-        else:
-            return 'FB', price_variation_percentage  # (Faux Baissier)
-    elif breakout_type == 2:  
-        if price_variation_percentage >= threshold_percentage:
-            return 'VH', price_variation_percentage  # (Vrai Haussier)
-        else:
-            return 'FH', price_variation_percentage  # (Faux Haussier)
-
-
-def train_and_save_model(engine, table_name):
-    df = pd.read_sql(f'SELECT * FROM {table_name}', engine)
-    
-    print(f"Data from {table_name}:")
-    print(df.head())
-
-    df = calculate_all_indicators(df)
-    
-    print("Indicators calculated.")
-    print(df.head())
-    
-    df['SAR_Reversals'] = calculate_pivot_reversals(df)
-    results = [isBreakOut(df, i) for i in range(len(df))]
-    df['Breakout_Type'] = [r[0] for r in results]
-    df['Slope'] = [r[1] for r in results]
-    df['Intercept'] = [r[2] for r in results]
-    df = detect_and_label_breakouts(df)
-    
-    Breakout_indices = df[df['Breakout_Confirmed'].notna()].index
     features = []
     labels = []
     for index in Breakout_indices:
@@ -300,17 +279,42 @@ def train_and_save_model(engine, table_name):
         if flat_features is not None:
             features.append(flat_features)
             labels.append(df.loc[index, 'Breakout_Confirmed'])
-    
+
+    return features, labels
+
+
+def train_and_save_model(engine, table_name):
+    df = pd.read_sql(f'SELECT * FROM {table_name}', engine)
+
+    print(f"Data from {table_name}:")
+    print(df.head())
+
+    df = calculate_all_indicators(df)
+
+    print("Indicators calculated.")
+    print(df.head())
+
+    df['SAR_Reversals'] = calculate_pivot_reversals(df)
+    results = [isBreakOut(df, i) for i in range(len(df))]
+    df['Breakout_Type'] = [r[0] for r in results]
+    df['Slope'] = [r[1] for r in results]
+    df['Intercept'] = [r[2] for r in results]
+
+    features, labels = detect_label_and_prepare_breakouts(df)
+
     if not features:
         print(f"No valid data to train for {table_name}")
         return
 
     X, y = np.array(features), np.array(labels)
-    
+
+    print(f"Class distribution in training data for {table_name}:")
+    print(pd.Series(y).value_counts())
+
     # Imputer les valeurs manquantes
     imputer = SimpleImputer(strategy='mean')
     X = imputer.fit_transform(X)
-    
+
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
@@ -325,6 +329,7 @@ def train_and_save_model(engine, table_name):
     model_filename = f"{table_name}_model.pkl"
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
+
 
 def main():
     conn_str = f'snowflake://{SP500_CONN["user"]}:{SP500_CONN["password"]}@{SP500_CONN["account"]}/{SP500_CONN["database"]}/{SP500_CONN["schema"]}?warehouse={SP500_CONN["warehouse"]}'
@@ -345,9 +350,9 @@ def main():
     table_name = f'ohlcv_data_{symbol}'.upper()
     last_date = get_last_date(conn, SP500_CONN['schema'], table_name)
     data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
-    
+
     # Charger les données dans Snowflake
-    load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
+    # load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
 
     train_and_save_model(engine, f"{SP500_CONN['schema']}.{table_name}")
 
@@ -378,3 +383,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
