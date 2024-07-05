@@ -137,6 +137,73 @@ def calculate_all_indicators(df):
     df.fillna(0, inplace=True)  # Handling NaN values by filling them with 0
     return df
 
+def calculate_pivot_reversals(df, window=3):
+    pivot_series = pd.Series([0]*len(df), index=df.index)
+    for candle in range(window, len(df) - window):
+        pivotHigh, pivotLow = True, True
+        current_high, current_low = df.iloc[candle]['High'], df.iloc[candle]['Low']
+        for i in range(candle-window, candle+window+1):
+            if df.iloc[i]['Low'] < current_low:
+                pivotLow = False
+            if df.iloc[i]['High'] > current_high:
+                pivotHigh = False
+        if pivotHigh and pivotLow:
+            pivot_series[candle] = 3  
+        elif pivotHigh:
+            pivot_series[candle] = 2
+        elif pivotLow:
+            pivot_series[candle] = 1
+    return pivot_series
+
+def collect_channel(df, candle, backcandles, window=1):
+    localdf = df[candle-backcandles-window:candle-window]
+    highs, idxhighs = localdf[localdf['SAR Reversals'] == 1].High.values, localdf[localdf['SAR Reversals'] == 1].High.index
+    lows, idxlows = localdf[localdf['SAR Reversals'] == 2].Low.values, localdf[localdf['SAR Reversals'] == 2].Low.index
+    if len(lows) >= 2 and len(highs) >= 2:
+        sl_lows, interc_lows, sl_highs, interc_highs, _, _ = stats.linregress(idxhighs, highs)
+        sl_highs, interc_highs, _, _, _ = stats.linregress(idxlows, lows)
+        return sl_lows, interc_lows, sl_highs, interc_highs, 0, 0
+    else:
+        return 0, 0, 0, 0, 0, 0
+
+def line_crosses_candles(data, slope, intercept, start_index, end_index):
+    body_crosses = 0
+    for i in range(start_index, end_index + 1):
+        candle = data.iloc[i]
+        predicted_price = intercept + slope * (i - start_index)
+        open_price, close_price = candle['Open'], candle['Close']
+        body_high, body_low = max(open_price, close_price), min(open_price, close_price)
+        if body_low <= predicted_price <= body_high:
+            body_crosses += 1
+    return body_crosses > 1
+
+def isBreakOut(df, candle, window=1):
+    for backcandles in [14, 20, 40, 60]:  
+        if (candle - backcandles - window) < 0:
+            continue
+        try:
+            sl_lows, interc_lows, sl_highs, interc_highs, _, _ = collect_channel(df, candle, backcandles, window)
+            if sl_lows == 0 and sl_highs == 0:
+                continue
+        except:
+            continue
+        prev_idx, curr_idx = candle - 1, candle
+        prev_high, prev_low, prev_close = df.iloc[prev_idx]['High'], df.iloc[prev_idx]['Low'], df.iloc[prev_idx]['Close']
+        curr_high, curr_low, curr_close, curr_open = df.iloc[candle]['High'], df.iloc[candle]['Low'], df.iloc[candle]['Close'], df.iloc[candle]['Open']
+        if (not line_crosses_candles(df, sl_highs, interc_highs, candle-backcandles, candle-1) and 
+            prev_low < (sl_highs * prev_idx + interc_highs) and
+            prev_close > (sl_highs * prev_idx + interc_highs) and
+            curr_open > (sl_highs * curr_idx + interc_highs) and
+            curr_close > (sl_highs * curr_idx + interc_highs)):
+            return 2, sl_highs, interc_highs
+        if (not line_crosses_candles(df, sl_lows, interc_lows, candle-backcandles, candle-1) and
+            prev_high > (sl_lows * prev_idx + interc_lows) and
+            prev_close < (sl_lows * prev_idx + interc_lows) and
+            curr_open < (sl_lows * curr_idx + interc_lows) and
+            curr_close < (sl_lows * curr_idx + interc_lows)):
+            return 1, sl_lows, interc_lows
+    return 0, None, None
+
 def extract_and_flatten_features(candle, df):
     if candle < 14:
         return None
