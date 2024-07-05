@@ -308,8 +308,7 @@ def detect_and_label_breakouts(df, confirmation_candles=5, threshold_percentage=
 
 
 
-   
-def train_and_save_model(session, table_name):
+   def train_and_save_model(session, table_name):
     df = session.table(table_name).to_pandas()
 
     print(f"Data from {table_name}:")
@@ -362,7 +361,7 @@ def train_and_save_model(session, table_name):
     print(f"Accuracy on test data for {table_name}: {accuracy_score(y_test, y_pred)}")
     print(f"Classification Report for {table_name}:\n{classification_report(y_test, y_pred)}")
 
-     model_filename = f"{table_name}_model.pkl"
+    model_filename = f"{table_name}_model.pkl"
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
 
