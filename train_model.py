@@ -257,6 +257,13 @@ def detect_and_label_breakouts(df, confirmation_candles=5, threshold_percentage=
     Breakout_confirmed = []
     Breakout_percentage = []
 
+    # Initialisation des colonnes
+    df['Breakout Type'] = np.nan
+    df['Slope'] = np.nan
+    df['Intercept'] = np.nan
+    df['Breakout Confirmed'] = np.nan
+    df['Price Variation %'] = np.nan
+
     for index in df.index:
         breakout_type, slope, intercept = isBreakOut(df, index)
         if breakout_type == 0:
@@ -348,6 +355,9 @@ def main():
     # Détection et étiquetage des breakouts
     data, Breakout_indices, Breakout_confirmed = detect_and_label_breakouts(data)
 
+    print("Columns after breakout detection:")
+    print(data.columns)
+
     print("Breakouts detected and labeled:")
     print(data[['Date', 'Breakout Type', 'Slope', 'Intercept', 'Breakout Confirmed']].head(20))
 
@@ -396,9 +406,6 @@ def main():
 if __name__ == "__main__":
     main()
 
-
-if __name__ == "__main__":
-    main()
 
 
 
