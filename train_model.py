@@ -457,17 +457,17 @@ def main():
     df['Breakout_Type'] = np.nan
     df['Slope'] = np.nan
     df['Intercept'] = np.nan
-    # for i in range(len(df)):
-    #     breakout_type, slope, intercept = isBreakOut(df, i)
-    #     df.at[i, 'Breakout_Type'] = breakout_type
-    #     df.at[i, 'Slope'] = slope
-    #     df.at[i, 'Intercept'] = intercept
+    for i in range(len(df)):
+        breakout_type, slope, intercept = isBreakOut(df, i)
+        df.at[i, 'Breakout_Type'] = breakout_type
+        df.at[i, 'Slope'] = slope
+        df.at[i, 'Intercept'] = intercept
 
-    # Détecter et étiqueter les breakouts
-    #df = detect_and_label_breakouts(df)
+    Détecter et étiqueter les breakouts
+    df = detect_and_label_breakouts(df)
     
-    # Entraîner et sauvegarder le modèle
-    #train_and_save_model(df, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
+    Entraîner et sauvegarder le modèle
+    train_and_save_model(df, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
 
     # Charger le modèle et prédire
     load_and_predict(df, symbol, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
