@@ -4,6 +4,8 @@ import numpy as np
 from scipy import stats
 import snowflake.connector
 from snowflake.snowpark import Session
+from sklearn.impute import SimpleImputer
+
 from snowflake.connector.pandas_tools import write_pandas
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -346,7 +348,8 @@ def train_and_save_model(session, table_name):
 
     # Conversion finale en tableaux numpy pour les caractéristiques et les labels
     X, y = np.array(features), np.array(labels)
-
+    imputer = SimpleImputer(strategy='mean')
+    X = imputer.fit_transform(X)
     # Préparation des caractéristiques et des étiquettes pour l'entraînement
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
