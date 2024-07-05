@@ -341,7 +341,7 @@ def train_and_save_model(session, table_name):
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
     # Initialisation et entraînement du modèle HistGradientBoostingClassifier
-    model = HistGradientBoostingClassifier(max_iter=100, random_state=42)
+    model = RandomForestClassifier(max_iter=100, random_state=42)
     model.fit(X_train, y_train)
 
     # Prédiction sur l'ensemble de test
