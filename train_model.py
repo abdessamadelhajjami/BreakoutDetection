@@ -373,6 +373,7 @@ def load_and_predict(df, symbol, table_name):
         features = extract_and_flatten_features(today_idx, df)
         if features.size == 0:
             return
+        features = features.reshape(1, -1) 
         imputer = SimpleImputer(strategy='mean')
         features = imputer.fit_transform(features)
         model_filename = f"{table_name}_model.pkl"
