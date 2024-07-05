@@ -269,18 +269,19 @@ def detect_label_and_prepare_breakouts(df, confirmation_candles=5, threshold_per
                 Breakout_confirmed.append(confirmation_label)
                 Breakout_percentage.append(price_variation_percentage)
 
-    print("Remaining NaN values after handling:")
-    print(df.isna().sum())
-
-    features = []
-    labels = []
-    for index in Breakout_indices:
-        flat_features = extract_and_flatten_features(index, df)
-        if flat_features is not None:
-            features.append(flat_features)
-            labels.append(df.loc[index, 'Breakout_Confirmed'])
+        print("Remaining NaN values after handling:")
+        print(df.isna().sum())
+    
+        features = []
+        labels = []
+        for index in Breakout_indices:
+            flat_features = extract_and_flatten_features(index, df)
+            if flat_features is not None:
+                features.append(flat_features)
+                labels.append(df.loc[index, 'Breakout_Confirmed'])
 
     return features, labels
+
 
 
 def train_and_save_model(engine, table_name):
@@ -305,7 +306,6 @@ def train_and_save_model(engine, table_name):
     print(f"Class distribution in training data for {table_name}:")
     print(pd.Series(y).value_counts())
 
-    # Imputer les valeurs manquantes
     imputer = SimpleImputer(strategy='mean')
     X = imputer.fit_transform(X)
 
