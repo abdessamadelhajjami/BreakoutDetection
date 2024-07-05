@@ -204,167 +204,195 @@ def calculate_all_indicators(df):
     df = calculate_bbands(df)
     df = calculate_volume_ma(df)
     df = calculate_keltner_channel(df)
+    
+    # Remplir les NaN avec les moyennes des colonnes respectives
+    df = df.apply(lambda x: x.fillna(x.mean()), axis=0)
+    
     return df
 
 def extract_and_flatten_features(candle, df):
     if candle < 14:
-        return None
-    data_window = df.iloc[candle-14:candle]
+        return None  # Retourne None si la bougie est trop proche du début du DataFrame pour une fenêtre de 14 jours
+    
+    data_window = df.iloc[candle-14:candle]  # Extraire les données pour les 14 jours précédents
+
     normalized_data = pd.DataFrame()
+
+    # Normalisation des SMA par rapport au prix de clôture
     for period in [7, 20, 50, 200]:
         sma_key = f'SMA_{period}'
         normalized_data[f'Norm_{sma_key}'] = data_window[sma_key] / data_window['Close']
+
+    # Normalisation du MACD par rapport à sa moyenne et son écart type
     normalized_data['Norm_MACD'] = (data_window['MACD'] - data_window['MACD'].mean()) / data_window['MACD'].std()
+    
+    # Normalisation du RSI
     normalized_data['Norm_RSI'] = (data_window['RSI'] - data_window['RSI'].mean()) / data_window['RSI'].std()
+    
+    # Calcul de la largeur normalisée des bandes de Bollinger
     normalized_data['Norm_Bollinger_Width'] = (data_window['Bollinger_High'] - data_window['Bollinger_Low']) / data_window['Bollinger_Mid']
+    
+    # Normalisation du volume par rapport à sa moyenne mobile
     normalized_data['Norm_Volume'] = data_window['Volume'] / data_window['Volume_MA']
+    
+    # Normalisation des bandes de Keltner
     normalized_data['Norm_Keltner_High'] = (data_window['Keltner_High'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
     normalized_data['Norm_Keltner_Low'] = (data_window['Keltner_Low'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
+
+    # Inclure des métadonnées de la bougie actuelle
     normalized_data['Slope'] = df['Slope'].iloc[candle]
     normalized_data['Intercept'] = df['Intercept'].iloc[candle]
     normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
-    flattened_features = normalized_data.values.flatten().tolist()
+
+    # Aplatir les données pour les rendre utilisables dans un modèle de ML
+    flattened_features = normalized_data.values.flatten().tolist()  
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
-    return np.array(flattened_features)
+
+    return np.array(flattened_features)  # Retourne un tableau numpy des caractéristiques
+
 
 def detect_and_label_breakouts(df, confirmation_candles=5, threshold_percentage=2):
     Breakout_indices = []
+    Breakout_types = []
     Breakout_confirmed = []
     Breakout_percentage = []
 
     for index in df.index:
         breakout_type, slope, intercept = isBreakOut(df, index)
-        if breakout_type in [1, 2]:
-            breakout_price = intercept
-            if index + confirmation_candles < len(df):
-                last_confirmed_price = df.iloc[index + confirmation_candles]['Close']
-                price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
+        if breakout_type == 0:
+            continue
 
-                if breakout_type == 1:
-                    if price_variation_percentage <= -threshold_percentage:
-                        confirmation_label = 'VB'
-                    else:
-                        confirmation_label = 'FB'
-                elif breakout_type == 2:
-                    if price_variation_percentage >= threshold_percentage:
-                        confirmation_label = 'VH'
-                    else:
-                        confirmation_label = 'FH'
+        if index + confirmation_candles >= len(df):
+            continue
 
-                df.at[index, 'Breakout_Type'] = breakout_type
-                df.at[index, 'Slope'] = slope
-                df.at[index, 'Intercept'] = intercept
-                df.at[index, 'Breakout_Confirmed'] = confirmation_label
-                df.at[index, 'Price_Variation_Percentage'] = price_variation_percentage
-                Breakout_indices.append(index)
-                Breakout_confirmed.append(confirmation_label)
-                Breakout_percentage.append(price_variation_percentage)
+        breakout_price = intercept
+        last_confirmed_price = df.iloc[index + confirmation_candles]['Close']
+        price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
 
-    print("Remaining NaN values after handling:")
-    print(df.isna().sum())
+        if breakout_type == 1:
+            if price_variation_percentage <= -threshold_percentage:
+                confirmation_label = 'VB'
+            else:
+                confirmation_label = 'FB'
+        elif breakout_type == 2:
+            if price_variation_percentage >= threshold_percentage:
+                confirmation_label = 'VH'
+            else:
+                confirmation_label = 'FH'
+        
+        df.at[index, 'Breakout Type'] = breakout_type
+        df.at[index, 'Slope'] = slope
+        df.at[index, 'Intercept'] = intercept
+        df.at[index, 'Breakout Confirmed'] = confirmation_label
+        df.at[index, 'Price Variation %'] = price_variation_percentage
+        
+        Breakout_indices.append(index)
+        Breakout_types.append(breakout_type)
+        Breakout_confirmed.append(confirmation_label)
+        Breakout_percentage.append(price_variation_percentage)
 
-    return Breakout_indices, Breakout_confirmed
+    # Filtrer pour ne garder que les résultats valides
+    filtered_percentages = [percentage for label, percentage in zip(Breakout_confirmed, Breakout_percentage) if label is not None]
+    filtered_types = [b_type for b_type, label in zip(Breakout_types, Breakout_confirmed) if label is not None]
+    filtered_indices = [index for index, label in zip(Breakout_indices, Breakout_confirmed) if label is not None]
+    filtered_confirmed = [label for label in Breakout_confirmed if label is not None]
 
-def train_and_save_model(engine, table_name):
-    df = pd.read_sql(f'SELECT * FROM {table_name}', engine)
+    # Mettre à jour les listes avec uniquement les données filtrées
+    Breakout_percentage = filtered_percentages
+    Breakout_types = filtered_types
+    Breakout_indices = filtered_indices
+    Breakout_confirmed = filtered_confirmed
+
+    return df, Breakout_indices, Breakout_confirmed
+
+
+
+
+   
+def train_and_save_model(session, table_name):
+    df = session.table(table_name).to_pandas()
 
     print(f"Data from {table_name}:")
     print(df.head())
 
+    # Calcul des indicateurs
     df = calculate_all_indicators(df)
 
     print("Indicators calculated.")
     print(df.head())
 
-    Breakout_indices, Breakout_confirmed = detect_and_label_breakouts(df)
+    # Détection et étiquetage des breakouts
+    df, Breakout_indices, Breakout_confirmed = detect_and_label_breakouts(df)
 
+    # Extraction des caractéristiques
     features = []
-    labels = []
     for index in Breakout_indices:
         flat_features = extract_and_flatten_features(index, df)
         if flat_features is not None:
             features.append(flat_features)
-            labels.append(df.loc[index, 'Breakout_Confirmed'])
 
     if not features:
         print(f"No valid data to train for {table_name}")
         return
 
-    X, y = np.array(features), np.array(labels)
+    # Conversion finale en tableaux numpy pour les caractéristiques et les labels
+    filtred_features = np.array(features)
+    filtred_labels = np.array(Breakout_confirmed)
 
-    print(f"Class distribution in training data for {table_name}:")
-    print(pd.Series(y).value_counts())
+    # Préparation des caractéristiques et des étiquettes pour l'entraînement
+    X = filtred_features
+    y = filtred_labels
 
-    imputer = SimpleImputer(strategy='mean')
-    X = imputer.fit_transform(X)
+    # Division des données en ensembles d'entraînement et de test
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    # Normalisation des caractéristiques pour améliorer les performances du modèle
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
-    model = RandomForestClassifier(n_estimators=800, max_depth=10, random_state=42, n_jobs=1)
-    model.fit(X_train_scaled, y_train)
-    y_pred = model.predict(X_test_scaled)
-    accuracy = accuracy_score(y_test, y_pred)
-    report = classification_report(y_test, y_pred, zero_division=0)
-    print(f"Accuracy on test data for {table_name}: {accuracy}")
-    print(f"Classification Report for {table_name}:\n{report}")
-    model_filename = f"{table_name}_model.pkl"
+
+    # Initialisation et entraînement du modèle de forêt aléatoire
+    model_rf = RandomForestClassifier(n_estimators=800, random_state=42)
+    model_rf.fit(X_train_scaled, y_train)
+
+    # Prédiction sur l'ensemble de test
+    y_pred = model_rf.predict(X_test_scaled)
+
+    # Évaluation des performances du modèle
+    print(f"Accuracy on test data for {table_name}: {accuracy_score(y_test, y_pred)}")
+    print(f"Classification Report for {table_name}:\n{classification_report(y_test, y_pred)}")
+
+     model_filename = f"{table_name}_model.pkl"
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
 
+
+
 def main():
-    conn_str = f'snowflake://{SP500_CONN["user"]}:{SP500_CONN["password"]}@{SP500_CONN["account"]}/{SP500_CONN["database"]}/{SP500_CONN["schema"]}?warehouse={SP500_CONN["warehouse"]}'
-    engine = create_engine(conn_str)
+    connection_parameters = {
+        'account': SNOWFLAKE_CONN['account'],
+        'user': SNOWFLAKE_CONN['user'],
+        'password': SNOWFLAKE_CONN['password'],
+        'warehouse': SNOWFLAKE_CONN['warehouse'],
+        'database': SNOWFLAKE_CONN['database'],
+        'schema': SNOWFLAKE_CONN['schema']
+    }
+    session = Session.builder.configs(connection_parameters).create()
+    
+    tables = session.sql(f"SELECT DISTINCT table_name FROM information_schema.tables WHERE table_schema = '{SNOWFLAKE_CONN['schema']}'").collect()
 
-    print('[MAIN] : Connecting to Snowflake for SP500 data...')
-    conn = snowflake.connector.connect(
-        user=SP500_CONN['user'],
-        password=SP500_CONN['password'],
-        account=SP500_CONN['account'],
-        warehouse=SP500_CONN['warehouse'],
-        database=SP500_CONN['database'],
-        schema=SP500_CONN['schema']
-    )
-    print('[MAIN] : Connected to Snowflake for SP500 data.')
-
-    symbol = 'MMM'
-    table_name = f'ohlcv_data_{symbol}'.upper()
-    last_date = get_last_date(conn, SP500_CONN['schema'], table_name)
-    data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
-
-    load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
-
-    train_and_save_model(engine, f"{SP500_CONN['schema']}.{table_name}")
-
-    print('[MAIN] : Predicting with model...')
-    query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
-    df = pd.read_sql(query, engine)
-    today_idx = df.index[-1]
-    breakout_type, slope, intercept = isBreakOut(df, today_idx)
-    if breakout_type > 0:
-        print("Breakout detected!")
-        features = extract_and_flatten_features(today_idx, df)
-        if features.size == 0:
-            return
-
-        model_filename = f"{table_name}_model.pkl"
-        model = joblib.load(model_filename)
-        scaler = StandardScaler()
-        features_scaled = scaler.fit_transform(features.reshape(1, -1))
-        prediction = model.predict(features_scaled)
-        if prediction[0] in ['VH', 'VB']:
-            message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
+    for table in tables:
+        train_and_save_model(session, table['TABLE_NAME'])
+        # Check for VH or VB
+        df = session.table(table['TABLE_NAME']).to_pandas()
+        vh_vb = df[(df['Breakout_Confirmed'] == 'VH') | (df['Breakout_Confirmed'] == 'VB')]
+        for _, row in vh_vb.iterrows():
+            message = f"A True Bullish/Bearish breakout detected today for the action {table['TABLE_NAME']}: {row['Breakout_Confirmed']} on {row['Date']}"
             send_telegram_message(message)
-    else:
-        print("No breakout detected.")
-    print("Finish.")
-    conn.close()
+    session.close()
 
 if __name__ == "__main__":
     main()
-
-
 
 
 
