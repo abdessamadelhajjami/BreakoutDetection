@@ -368,6 +368,15 @@ def train_and_save_model(session, table_name):
 
 
 def main():
+
+    SP500_CONN = {
+        'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
+        'user': 'AELHAJJAMI',
+        'password': 'Abdou3012',
+        'warehouse': 'COMPUTE_WH',
+        'database': 'BREAKOUDETECTIONDB',
+        'schema': 'SP500',
+    }
     conn_str = f'snowflake://{SP500_CONN["user"]}:{SP500_CONN["password"]}@{SP500_CONN["account"]}/{SP500_CONN["database"]}/{SP500_CONN["schema"]}?warehouse={SP500_CONN["warehouse"]}'
     engine = create_engine(conn_str)
 
