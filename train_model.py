@@ -231,6 +231,8 @@ def extract_and_flatten_features(candle, df):
     flattened_features = normalized_data.values.flatten().tolist()
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
+    
+
 
 
 
@@ -249,7 +251,6 @@ def detect_and_label_breakouts(df):
                 Breakout_indices.append(index)
                 Breakout_confirmed.append(confirmation_label)
                 Breakout_percentage.append(variation)
-    df.fillna(0, inplace=True)  # Handling NaN values by filling them with 0
     return df
 
 def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
@@ -257,20 +258,21 @@ def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_perce
         return None, None  
 
     breakout_type = df.loc[breakout_index, 'Breakout_Type']
-    breakout_price = df.loc[breakout_index, 'Intercept'] 
+    breakout_price = df.loc[breakout_index, 'Intercept']
     last_confirmed_price = df.iloc[breakout_index + confirmation_candles]['Close']
     price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
 
     if breakout_type == 1:  
         if price_variation_percentage <= -threshold_percentage:
-            return 'VB', price_variation_percentage
+            return 'VB', price_variation_percentage  # (Vrai Baissier)
         else:
-            return 'FB', price_variation_percentage
+            return 'FB', price_variation_percentage  # (Faux Baissier)
     elif breakout_type == 2:  
         if price_variation_percentage >= threshold_percentage:
-            return 'VH', price_variation_percentage
+            return 'VH', price_variation_percentage  # (Vrai Haussier)
         else:
-            return 'FH', price_variation_percentage
+            return 'FH', price_variation_percentage  # (Faux Haussier)
+
 
 def train_and_save_model(engine, table_name):
     df = pd.read_sql(f'SELECT * FROM {table_name}', engine)
