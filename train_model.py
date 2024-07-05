@@ -310,7 +310,7 @@ def train_and_save_model(df, table_name):
     model_filename = f"{table_name}_model.pkl"
     scaler_filename = f"{table_name}_scaler.pkl"
 
-    if os.path.exists(model_filename) and os.path.exists(scaler_filename):
+    if os.path.exists(model_filename) :
         print(f"Model and scaler for {table_name} already exist. Skipping training.")
         return
     print(f"Data from {table_name}:")
