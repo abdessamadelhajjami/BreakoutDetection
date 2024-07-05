@@ -127,37 +127,6 @@ def calculate_keltner_channel(df, ema_period=20, atr_period=20, multiplier=2):
     df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']
     return df
 
-def calculate_all_indicators(df):
-    df = calculate_sma(df, [7, 20, 50, 200])
-    df = calculate_macd(df)
-    df = calculate_rsi(df)
-    df = calculate_bbands(df)
-    df = calculate_volume_ma(df)
-    df = calculate_keltner_channel(df)
-    return df
-
-def extract_and_flatten_features(candle, df):
-    if candle < 14:
-        return None
-    data_window = df.iloc[candle-14:candle]
-    normalized_data = pd.DataFrame()
-    for period in [7, 20, 50, 200]:
-        sma_key = f'SMA_{period}'
-        normalized_data[f'Norm_{sma_key}'] = data_window[sma_key] / data_window['Close']
-    normalized_data['Norm_MACD'] = (data_window['MACD'] - data_window['MACD'].mean()) / data_window['MACD'].std()
-    normalized_data['Norm_RSI'] = (data_window['RSI'] - data_window['RSI'].mean()) / data_window['RSI'].std()
-    normalized_data['Norm_Bollinger_Width'] = (data_window['Bollinger_High'] - data_window['Bollinger_Low']) / data_window['Bollinger_Mid']
-    normalized_data['Norm_Volume'] = data_window['Volume'] / data_window['Volume_MA']
-    normalized_data['Norm_Keltner_High'] = (data_window['Keltner_High'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
-    normalized_data['Norm_Keltner_Low'] = (data_window['Keltner_Low'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
-    normalized_data['Slope'] = df['Slope'].iloc[candle]
-    normalized_data['Intercept'] = df['Intercept'].iloc[candle]
-    normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
-    flattened_features = normalized_data.values.flatten().tolist()
-    flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
-    return np.array(flattened_features)
-
-
 
 
 
@@ -228,6 +197,38 @@ def isBreakOut(df, candle, window=1):
             return 1, sl_lows, interc_lows
     return 0, None, None
 
+
+
+
+def calculate_all_indicators(df):
+    df = calculate_sma(df, [7, 20, 50, 200])
+    df = calculate_macd(df)
+    df = calculate_rsi(df)
+    df = calculate_bbands(df)
+    df = calculate_volume_ma(df)
+    df = calculate_keltner_channel(df)
+    return df
+
+def extract_and_flatten_features(candle, df):
+    if candle < 14:
+        return None
+    data_window = df.iloc[candle-14:candle]
+    normalized_data = pd.DataFrame()
+    for period in [7, 20, 50, 200]:
+        sma_key = f'SMA_{period}'
+        normalized_data[f'Norm_{sma_key}'] = data_window[sma_key] / data_window['Close']
+    normalized_data['Norm_MACD'] = (data_window['MACD'] - data_window['MACD'].mean()) / data_window['MACD'].std()
+    normalized_data['Norm_RSI'] = (data_window['RSI'] - data_window['RSI'].mean()) / data_window['RSI'].std()
+    normalized_data['Norm_Bollinger_Width'] = (data_window['Bollinger_High'] - data_window['Bollinger_Low']) / data_window['Bollinger_Mid']
+    normalized_data['Norm_Volume'] = data_window['Volume'] / data_window['Volume_MA']
+    normalized_data['Norm_Keltner_High'] = (data_window['Keltner_High'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
+    normalized_data['Norm_Keltner_Low'] = (data_window['Keltner_Low'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
+    normalized_data['Slope'] = df['Slope'].iloc[candle]
+    normalized_data['Intercept'] = df['Intercept'].iloc[candle]
+    normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
+    flattened_features = normalized_data.values.flatten().tolist()
+    flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
+    return np.array(flattened_features)
 
 def confirm_and_label_breakouts(df, confirmation_candles=5, threshold_percentage=2):
     Breakout_indices = []
