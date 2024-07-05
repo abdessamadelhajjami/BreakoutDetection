@@ -205,8 +205,8 @@ def calculate_all_indicators(df):
     df = calculate_volume_ma(df)
     df = calculate_keltner_channel(df)
     
-    # Remplir les NaN avec les moyennes des colonnes respectives
-    df = df.apply(lambda x: x.fillna(x.mean()), axis=0)
+    # Remplir les NaN avec les moyennes des colonnes respectives, sauf pour la colonne 'Date'
+    df = df.apply(lambda x: x.fillna(x.mean()) if x.name != 'Date' else x, axis=0)
     
     return df
 
