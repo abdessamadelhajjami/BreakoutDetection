@@ -366,9 +366,8 @@ def train_and_save_model(session, table_name):
     print(f"Model saved as {model_filename}")
 
 
-
 def main():
-
+    # Connexion à Snowflake
     SP500_CONN = {
         'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
         'user': 'AELHAJJAMI',
@@ -377,6 +376,7 @@ def main():
         'database': 'BREAKOUDETECTIONDB',
         'schema': 'SP500',
     }
+
     conn_str = f'snowflake://{SP500_CONN["user"]}:{SP500_CONN["password"]}@{SP500_CONN["account"]}/{SP500_CONN["database"]}/{SP500_CONN["schema"]}?warehouse={SP500_CONN["warehouse"]}'
     engine = create_engine(conn_str)
 
@@ -396,8 +396,10 @@ def main():
     last_date = get_last_date(conn, SP500_CONN['schema'], table_name)
     data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
 
+    # Charger les données dans Snowflake
     # load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
 
+    # Entraîner et sauvegarder le modèle
     train_and_save_model(engine, f"{SP500_CONN['schema']}.{table_name}")
 
     print('[MAIN] : Predicting with model...')
