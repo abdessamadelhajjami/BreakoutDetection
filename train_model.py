@@ -409,7 +409,8 @@ def main():
         schema=SNOWFLAKE_CONN['schema']
     )
 
-    symbol = 'AAPL'
+    symbol = 'AMZN'
+    
     table_name = f'ohlcv_data_{symbol}'.upper()
     last_date = get_last_date(conn, table_name)
     data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
