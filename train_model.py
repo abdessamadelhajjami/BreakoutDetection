@@ -135,8 +135,9 @@ def calculate_all_indicators(df):
     df = calculate_bbands(df)
     df = calculate_volume_ma(df)
     df = calculate_keltner_channel(df)
-    # Remplacer les valeurs NaN par la moyenne de la colonne
-    df = df.apply(lambda x: x.fillna(x.mean()), axis=0)
+    # Remplacer les valeurs NaN par la moyenne de la colonne seulement pour les colonnes numériques
+    numeric_columns = df.select_dtypes(include=[np.number]).columns
+    df[numeric_columns] = df[numeric_columns].apply(lambda x: x.fillna(x.mean()), axis=0)
     return df
 
 
@@ -224,11 +225,13 @@ def extract_and_flatten_features(candle, df):
     normalized_data['Slope'] = df['Slope'].iloc[candle]
     normalized_data['Intercept'] = df['Intercept'].iloc[candle]
     normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
-    # Remplacer les valeurs NaN par la moyenne de la colonne
-    normalized_data = normalized_data.apply(lambda x: x.fillna(x.mean()), axis=0)
+    # Remplacer les valeurs NaN par la moyenne de la colonne seulement pour les colonnes numériques
+    numeric_columns = normalized_data.select_dtypes(include=[np.number]).columns
+    normalized_data[numeric_columns] = normalized_data[numeric_columns].apply(lambda x: x.fillna(x.mean()), axis=0)
     flattened_features = normalized_data.values.flatten().tolist()
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
+
 
 
 def detect_and_label_breakouts(df):
