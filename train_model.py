@@ -395,7 +395,7 @@ def load_and_predict(df, symbol, table_name):
     print('[MAIN] : Predicting with model...')
 
     today_idx = df.index[-1]
-    breakout_type, slope, intercept = 1, 0.24, 0.12  # Simulé pour le test
+    breakout_type, slope, intercept = isBreakOut(df, today_idx) # Simulé pour le test
 
     if breakout_type > 0:
         print("Breakout detected!")
@@ -431,7 +431,7 @@ def load_and_predict(df, symbol, table_name):
 
         # Prédiction
         prediction = model.predict(features_scaled)
-        prediction[0] = 'VH'  # Directly set the value for testing
+        #prediction[0] = 'VH'  # Directly set the value for testing
 
         if prediction[0] in ['VH', 'VB']:
             message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
