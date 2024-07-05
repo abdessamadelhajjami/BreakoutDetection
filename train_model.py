@@ -241,12 +241,12 @@ def detect_label_and_prepare_breakouts(df, confirmation_candles=5, threshold_per
     Breakout_confirmed = []
     Breakout_percentage = []
 
-    for index in df.index:
-        breakout_type = df.loc[index, 'Breakout_Type']
+    for candle in range(len(df)):
+        breakout_type, slope, intercept = isBreakOut(df, candle)
         if breakout_type in [1, 2]:
-            breakout_price = df.loc[index, 'Intercept']
-            if index + confirmation_candles < len(df):
-                last_confirmed_price = df.iloc[index + confirmation_candles]['Close']
+            breakout_price = intercept
+            if candle + confirmation_candles < len(df):
+                last_confirmed_price = df.iloc[candle + confirmation_candles]['Close']
                 price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
 
                 if breakout_type == 1:
@@ -260,14 +260,14 @@ def detect_label_and_prepare_breakouts(df, confirmation_candles=5, threshold_per
                     else:
                         confirmation_label = 'FH'
 
-                df.at[index, 'Breakout_Confirmed'] = confirmation_label
-                df.at[index, 'Price_Variation_Percentage'] = price_variation_percentage
-                Breakout_indices.append(index)
+                df.at[candle, 'Breakout_Type'] = breakout_type
+                df.at[candle, 'Slope'] = slope
+                df.at[candle, 'Intercept'] = intercept
+                df.at[candle, 'Breakout_Confirmed'] = confirmation_label
+                df.at[candle, 'Price_Variation_Percentage'] = price_variation_percentage
+                Breakout_indices.append(candle)
                 Breakout_confirmed.append(confirmation_label)
                 Breakout_percentage.append(price_variation_percentage)
-
-    # Handling NaN values by filling them with the mean of the column
-    # df = df.apply(lambda x: x.fillna(x.mean()), axis=0)
 
     print("Remaining NaN values after handling:")
     print(df.isna().sum())
@@ -293,12 +293,6 @@ def train_and_save_model(engine, table_name):
 
     print("Indicators calculated.")
     print(df.head())
-
-    df['SAR_Reversals'] = calculate_pivot_reversals(df)
-    results = [isBreakOut(df, i) for i in range(len(df))]
-    df['Breakout_Type'] = [r[0] for r in results]
-    df['Slope'] = [r[1] for r in results]
-    df['Intercept'] = [r[2] for r in results]
 
     features, labels = detect_label_and_prepare_breakouts(df)
 
@@ -330,7 +324,6 @@ def train_and_save_model(engine, table_name):
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
 
-
 def main():
     conn_str = f'snowflake://{SP500_CONN["user"]}:{SP500_CONN["password"]}@{SP500_CONN["account"]}/{SP500_CONN["database"]}/{SP500_CONN["schema"]}?warehouse={SP500_CONN["warehouse"]}'
     engine = create_engine(conn_str)
@@ -352,7 +345,7 @@ def main():
     data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
 
     # Charger les données dans Snowflake
-    # load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
+    load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
 
     train_and_save_model(engine, f"{SP500_CONN['schema']}.{table_name}")
 
