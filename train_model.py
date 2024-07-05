@@ -351,6 +351,11 @@ def train_and_save_model(df, table_name):
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
 
+    scaler_filename = f"{table_name}_scaler.pkl"
+    joblib.dump(scaler, scaler_filename)
+    print(f"Scaler saved as {scaler_filename}")
+
+
     
 # Send Telegram notification
 def send_telegram_message(message):
@@ -364,29 +369,50 @@ def send_telegram_message(message):
 
 
 
+import joblib
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+import numpy as np
+
 def load_and_predict(df, symbol, table_name):
     print('[MAIN] : Predicting with model...')
     
     today_idx = df.index[-1]
-    breakout_type, slope, intercept = 1 , 0.24 , 0.12 #isBreakOut(df, today_idx)
+    breakout_type, slope, intercept = 1, 0.24, 0.12  # isBreakOut(df, today_idx)
+    
     if breakout_type > 0:
         print("Breakout detected!")
         features = extract_and_flatten_features(today_idx, df)
-        if features.size == 0:
+        if features is None or features.size == 0:
+            print("No features extracted, prediction skipped.")
             return
-    
+        
+        # Imputer pour gérer les valeurs manquantes
+        imputer = SimpleImputer(strategy='mean')
+        features = imputer.fit_transform(features.reshape(1, -1))
+
         model_filename = f"{table_name}_model.pkl"
         model = joblib.load(model_filename)
-        scaler = StandardScaler()  # Need to ensure scaler is consistent with training
-        features_scaled = scaler.fit_transform(features.reshape(1, -1))
+        print("Model loaded successfully.")
+
+        # Charger le scaler utilisé pour l'entraînement
+        scaler_filename = f"{table_name}_scaler.pkl"
+        scaler = joblib.load(scaler_filename)
+        
+        # Mettre à l'échelle les caractéristiques
+        features_scaled = scaler.transform(features)
+        
+        # Prédiction
         prediction = model.predict(features_scaled)
         prediction[0] = 'VH'  # Directly set the value for testing
+        
         if prediction[0] in ['VH', 'VB']:
             message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
             send_telegram_message(message)
     else:
         print("No breakout detected.")
     print("Finish.")
+
 
 
 def main():
@@ -409,7 +435,7 @@ def main():
         schema=SNOWFLAKE_CONN['schema']
     )
 
-    symbol = 'AAL'
+    symbol = 'MMM'
     table_name = f'ohlcv_data_{symbol}'.upper()
     last_date = get_last_date(conn, table_name)
     data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
