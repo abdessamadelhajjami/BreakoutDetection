@@ -127,7 +127,6 @@ def calculate_keltner_channel(df, ema_period=20, atr_period=20, multiplier=2):
     df['Keltner_Low'] = df['Keltner_Mid'] - multiplier * df['ATR']
     return df
 
-
 def calculate_all_indicators(df):
     df = calculate_sma(df, [7, 20, 50, 200])
     df = calculate_macd(df)
@@ -135,10 +134,31 @@ def calculate_all_indicators(df):
     df = calculate_bbands(df)
     df = calculate_volume_ma(df)
     df = calculate_keltner_channel(df)
-    # # Remplacer les valeurs NaN par la moyenne de la colonne seulement pour les colonnes numériques
-    # numeric_columns = df.select_dtypes(include=[np.number]).columns
-    # df[numeric_columns] = df[numeric_columns].apply(lambda x: x.fillna(x.mean()), axis=0)
     return df
+
+def extract_and_flatten_features(candle, df):
+    if candle < 14:
+        return None
+    data_window = df.iloc[candle-14:candle]
+    normalized_data = pd.DataFrame()
+    for period in [7, 20, 50, 200]:
+        sma_key = f'SMA_{period}'
+        normalized_data[f'Norm_{sma_key}'] = data_window[sma_key] / data_window['Close']
+    normalized_data['Norm_MACD'] = (data_window['MACD'] - data_window['MACD'].mean()) / data_window['MACD'].std()
+    normalized_data['Norm_RSI'] = (data_window['RSI'] - data_window['RSI'].mean()) / data_window['RSI'].std()
+    normalized_data['Norm_Bollinger_Width'] = (data_window['Bollinger_High'] - data_window['Bollinger_Low']) / data_window['Bollinger_Mid']
+    normalized_data['Norm_Volume'] = data_window['Volume'] / data_window['Volume_MA']
+    normalized_data['Norm_Keltner_High'] = (data_window['Keltner_High'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
+    normalized_data['Norm_Keltner_Low'] = (data_window['Keltner_Low'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
+    normalized_data['Slope'] = df['Slope'].iloc[candle]
+    normalized_data['Intercept'] = df['Intercept'].iloc[candle]
+    normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
+    flattened_features = normalized_data.values.flatten().tolist()
+    flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
+    return np.array(flattened_features)
+
+
+
 
 
 def calculate_pivot_reversals(df, window=3):
@@ -208,45 +228,18 @@ def isBreakOut(df, candle, window=1):
             return 1, sl_lows, interc_lows
     return 0, None, None
 
-def extract_and_flatten_features(candle, df):
-    if candle < 14:
-        return None
-    data_window = df.iloc[candle-14:candle]
-    normalized_data = pd.DataFrame()
-    for period in [7, 20, 50, 200]:
-        sma_key = f'SMA_{period}'
-        normalized_data[f'Norm_{sma_key}'] = data_window[sma_key] / data_window['Close']
-    normalized_data['Norm_MACD'] = (data_window['MACD'] - data_window['MACD'].mean()) / data_window['MACD'].std()
-    normalized_data['Norm_RSI'] = (data_window['RSI'] - data_window['RSI'].mean()) / data_window['RSI'].std()
-    normalized_data['Norm_Bollinger_Width'] = (data_window['Bollinger_High'] - data_window['Bollinger_Low']) / data_window['Bollinger_Mid']
-    normalized_data['Norm_Volume'] = data_window['Volume'] / data_window['Volume_MA']
-    normalized_data['Norm_Keltner_High'] = (data_window['Keltner_High'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
-    normalized_data['Norm_Keltner_Low'] = (data_window['Keltner_Low'] - data_window['Keltner_Mid']) / data_window['Keltner_Mid']
-    normalized_data['Slope'] = df['Slope'].iloc[candle]
-    normalized_data['Intercept'] = df['Intercept'].iloc[candle]
-    normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
-    # Remplacer les valeurs NaN par la moyenne de la colonne seulement pour les colonnes numériques
-    # numeric_columns = normalized_data.select_dtypes(include=[np.number]).columns
-    # normalized_data[numeric_columns] = normalized_data[numeric_columns].apply(lambda x: x.fillna(x.mean()), axis=0)
-    flattened_features = normalized_data.values.flatten().tolist()
-    flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
-    return np.array(flattened_features)
-    
 
-
-
-
-def detect_label_and_prepare_breakouts(df, confirmation_candles=5, threshold_percentage=2):
+def confirm_and_label_breakouts(df, confirmation_candles=5, threshold_percentage=2):
     Breakout_indices = []
     Breakout_confirmed = []
     Breakout_percentage = []
 
-    for candle in range(len(df)):
-        breakout_type, slope, intercept = isBreakOut(df, candle)
+    for index in df.index:
+        breakout_type, slope, intercept = isBreakOut(df, index)
         if breakout_type in [1, 2]:
             breakout_price = intercept
-            if candle + confirmation_candles < len(df):
-                last_confirmed_price = df.iloc[candle + confirmation_candles]['Close']
+            if index + confirmation_candles < len(df):
+                last_confirmed_price = df.iloc[index + confirmation_candles]['Close']
                 price_variation_percentage = ((last_confirmed_price - breakout_price) / breakout_price) * 100
 
                 if breakout_type == 1:
@@ -260,29 +253,19 @@ def detect_label_and_prepare_breakouts(df, confirmation_candles=5, threshold_per
                     else:
                         confirmation_label = 'FH'
 
-                df.at[candle, 'Breakout_Type'] = breakout_type
-                df.at[candle, 'Slope'] = slope
-                df.at[candle, 'Intercept'] = intercept
-                df.at[candle, 'Breakout_Confirmed'] = confirmation_label
-                df.at[candle, 'Price_Variation_Percentage'] = price_variation_percentage
-                Breakout_indices.append(candle)
+                df.at[index, 'Breakout_Type'] = breakout_type
+                df.at[index, 'Slope'] = slope
+                df.at[index, 'Intercept'] = intercept
+                df.at[index, 'Breakout_Confirmed'] = confirmation_label
+                df.at[index, 'Price_Variation_Percentage'] = price_variation_percentage
+                Breakout_indices.append(index)
                 Breakout_confirmed.append(confirmation_label)
                 Breakout_percentage.append(price_variation_percentage)
 
-        print("Remaining NaN values after handling:")
-        print(df.isna().sum())
-    
-        features = []
-        labels = []
-        for index in Breakout_indices:
-            flat_features = extract_and_flatten_features(index, df)
-            if flat_features is not None:
-                features.append(flat_features)
-                labels.append(df.loc[index, 'Breakout_Confirmed'])
+    print("Remaining NaN values after handling:")
+    print(df.isna().sum())
 
-    return features, labels
-
-
+    return Breakout_indices, Breakout_confirmed
 
 def train_and_save_model(engine, table_name):
     df = pd.read_sql(f'SELECT * FROM {table_name}', engine)
@@ -295,7 +278,15 @@ def train_and_save_model(engine, table_name):
     print("Indicators calculated.")
     print(df.head())
 
-    features, labels = detect_label_and_prepare_breakouts(df)
+    Breakout_indices, Breakout_confirmed = confirm_and_label_breakouts(df)
+
+    features = []
+    labels = []
+    for index in Breakout_indices:
+        flat_features = extract_and_flatten_features(index, df)
+        if flat_features is not None:
+            features.append(flat_features)
+            labels.append(df.loc[index, 'Breakout_Confirmed'])
 
     if not features:
         print(f"No valid data to train for {table_name}")
@@ -344,12 +335,10 @@ def main():
     last_date = get_last_date(conn, SP500_CONN['schema'], table_name)
     data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
 
-    # Charger les données dans Snowflake
     load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
 
     train_and_save_model(engine, f"{SP500_CONN['schema']}.{table_name}")
 
-    # Simulation de prédiction avec le modèle
     print('[MAIN] : Predicting with model...')
     query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
     df = pd.read_sql(query, engine)
@@ -376,4 +365,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
 
