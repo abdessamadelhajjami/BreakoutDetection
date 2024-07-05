@@ -373,11 +373,13 @@ def load_and_predict(df, symbol, table_name):
         features = extract_and_flatten_features(today_idx, df)
         if features.size == 0:
             return
-
+        imputer = SimpleImputer(strategy='mean')
+        features = imputer.fit_transform(X)
         model_filename = f"{table_name}_model.pkl"
         model = joblib.load(model_filename)
         print("model bien chargé<<<<")
         scaler = StandardScaler()
+     
         features_scaled = scaler.fit_transform(features.reshape(1, -1))
         prediction = model.predict(features_scaled)
         prediction[0]='VH'
