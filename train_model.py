@@ -4,6 +4,7 @@ import numpy as np
 from scipy import stats
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
+from sqlalchemy import create_engine
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
@@ -11,7 +12,6 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 import joblib
 import requests
-from sqlalchemy import create_engine
 import os
 
 # Telegram bot configuration
@@ -80,75 +80,7 @@ def get_last_date(conn, schema, table_name):
         return '2010-01-01'
     else:
         return (pd.to_datetime(last_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-def calculate_pivot_reversals(df, window=3):
-    pivot_series = pd.Series([0]*len(df), index=df.index)
-    for candle in range(window, len(df) - window):
-        pivotHigh, pivotLow = True, True
-        current_high, current_low = df.iloc[candle]['High'], df.iloc[candle]['Low']
-        for i in range(candle-window, candle+window+1):
-            if df.iloc[i]['Low'] < current_low:
-                pivotLow = False
-            if df.iloc[i]['High'] > current_high:
-                pivotHigh = False
-        if pivotHigh and pivotLow:
-            pivot_series[candle] = 3  
-        elif pivotHigh:
-            pivot_series[candle] = 2
-        elif pivotLow:
-            pivot_series[candle] = 1
-    return pivot_series
 
-# Collecte des données de canaux
-def collect_channel(df, candle, backcandles, window=1):
-    localdf = df[candle-backcandles-window:candle-window]
-    highs, idxhighs = localdf[localdf['SAR Reversals'] == 1].High.values, localdf[localdf['SAR Reversals'] == 1].High.index
-    lows, idxlows = localdf[localdf['SAR Reversals'] == 2].Low.values, localdf[localdf['SAR Reversals'] == 2].Low.index
-    if len(lows) >= 2 and len(highs) >= 2:
-        sl_lows, interc_lows, sl_highs, interc_highs, _, _ = stats.linregress(idxhighs, highs)
-        sl_highs, interc_highs, _, _, _ = stats.linregress(idxlows, lows)
-        return sl_lows, interc_lows, sl_highs, interc_highs, 0, 0
-    else:
-        return 0, 0, 0, 0, 0, 0
-
-# Vérification de la croisement de la ligne
-def line_crosses_candles(data, slope, intercept, start_index, end_index):
-    body_crosses = 0
-    for i in range(start_index, end_index + 1):
-        candle = data.iloc[i]
-        predicted_price = intercept + slope * (i - start_index)
-        open_price, close_price = candle['Open'], candle['Close']
-        body_high, body_low = max(open_price, close_price), min(open_price, close_price)
-        if body_low <= predicted_price <= body_high:
-            body_crosses += 1
-    return body_crosses > 1
-
-# Détection des breakouts
-def isBreakOut(df, candle, window=1):
-    for backcandles in [14, 20, 40, 60]:  
-        if (candle - backcandles - window) < 0:
-            continue
-        try:
-            sl_lows, interc_lows, sl_highs, interc_highs, _, _ = collect_channel(df, candle, backcandles, window)
-            if sl_lows == 0 and sl_highs == 0:
-                continue
-        except:
-            continue
-        prev_idx, curr_idx = candle - 1, candle
-        prev_high, prev_low, prev_close = df.iloc[prev_idx]['High'], df.iloc[prev_idx]['Low'], df.iloc[prev_idx]['Close']
-        curr_high, curr_low, curr_close, curr_open = df.iloc[candle]['High'], df.iloc[candle]['Low'], df.iloc[candle]['Close'], df.iloc[candle]['Open']
-        if (not line_crosses_candles(df, sl_highs, interc_highs, candle-backcandles, candle-1) and 
-            prev_low < (sl_highs * prev_idx + interc_highs) and
-            prev_close > (sl_highs * prev_idx + interc_highs) and
-            curr_open > (sl_highs * curr_idx + interc_highs) and
-            curr_close > (sl_highs * curr_idx + interc_highs)):
-            return 2, sl_highs, interc_highs
-        if (not line_crosses_candles(df, sl_lows, interc_lows, candle-backcandles, candle-1) and
-            prev_high > (sl_lows * prev_idx + interc_lows) and
-            prev_close < (sl_lows * prev_idx + interc_lows) and
-            curr_open < (sl_lows * curr_idx + interc_lows) and
-            curr_close < (sl_lows * curr_idx + interc_lows)):
-            return 1, sl_lows, interc_lows
-    return 0, None, None
 def calculate_sma(df, periods):
     for period in periods:
         sma_key = f'SMA_{period}'
@@ -202,6 +134,7 @@ def calculate_all_indicators(df):
     df = calculate_bbands(df)
     df = calculate_volume_ma(df)
     df = calculate_keltner_channel(df)
+    df.fillna(0, inplace=True)  # Handling NaN values by filling them with 0
     return df
 
 def extract_and_flatten_features(candle, df):
@@ -221,6 +154,7 @@ def extract_and_flatten_features(candle, df):
     normalized_data['Slope'] = df['Slope'].iloc[candle]
     normalized_data['Intercept'] = df['Intercept'].iloc[candle]
     normalized_data['Breakout_Type'] = df['Breakout_Type'].iloc[candle]
+    normalized_data.fillna(0, inplace=True)  # Handling NaN values by filling them with 0
     flattened_features = normalized_data.values.flatten().tolist()
     flattened_features.extend([normalized_data['Slope'].iloc[-1], normalized_data['Intercept'].iloc[-1], normalized_data['Breakout_Type'].iloc[-1]])
     return np.array(flattened_features)
@@ -240,10 +174,7 @@ def detect_and_label_breakouts(df):
                 Breakout_indices.append(index)
                 Breakout_confirmed.append(confirmation_label)
                 Breakout_percentage.append(variation)
-    
-    print("NaN values after detecting and labeling breakouts:")
-    print(df.isna().sum())
-    
+    df.fillna(0, inplace=True)  # Handling NaN values by filling them with 0
     return df
 
 def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_percentage=2):
@@ -257,14 +188,14 @@ def confirm_breakout(df, breakout_index, confirmation_candles=5, threshold_perce
 
     if breakout_type == 1:  
         if price_variation_percentage <= -threshold_percentage:
-            return 'VB', price_variation_percentage  #  (Vrai Baissier)
+            return 'VB', price_variation_percentage
         else:
-            return 'FB', price_variation_percentage  #  (Faux Baissier)
+            return 'FB', price_variation_percentage
     elif breakout_type == 2:  
         if price_variation_percentage >= threshold_percentage:
-            return 'VH', price_variation_percentage  
+            return 'VH', price_variation_percentage
         else:
-            return 'FH', price_variation_percentage 
+            return 'FH', price_variation_percentage
 
 def train_and_save_model(engine, table_name):
     df = pd.read_sql(f'SELECT * FROM {table_name}', engine)
@@ -319,7 +250,6 @@ def train_and_save_model(engine, table_name):
     print(f"Model saved as {model_filename}")
 
 def main():
-    # Création de l'URL de connexion SQLAlchemy
     conn_str = f'snowflake://{SP500_CONN["user"]}:{SP500_CONN["password"]}@{SP500_CONN["account"]}/{SP500_CONN["database"]}/{SP500_CONN["schema"]}?warehouse={SP500_CONN["warehouse"]}'
     engine = create_engine(conn_str)
 
