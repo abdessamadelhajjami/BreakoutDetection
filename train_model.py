@@ -5,7 +5,8 @@ from scipy import stats
 import snowflake.connector
 from snowflake.snowpark import Session
 from sklearn.impute import SimpleImputer
-
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
 from snowflake.connector.pandas_tools import write_pandas
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -362,28 +363,49 @@ def send_telegram_message(message):
     if response.status_code != 200:
         print(f"Failed to send message: {response.text}")
 
+
+def create_preprocessing_pipeline():
+    feature_columns = ['Norm_SMA_7', 'Norm_SMA_20', 'Norm_SMA_50', 'Norm_SMA_200',
+                       'Norm_MACD', 'Norm_RSI', 'Norm_Bollinger_Width', 'Norm_Volume', 
+                       'Norm_Keltner_High', 'Norm_Keltner_Low', 'Slope', 'Intercept', 'Breakout_Type']
+    
+    numeric_transformer = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='mean')),
+        ('scaler', StandardScaler())
+    ])
+    
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', numeric_transformer, feature_columns)
+        ])
+    
+    return preprocessor
+
+
+    
 def load_and_predict(df, symbol, table_name):
     print('[MAIN] : Predicting with model...')
     
     today_idx = df.index[-1]
-    breakout_type, slope, intercept = 1 , 0.21 , -0.21 # isBreakOut(df, today_idx)
+    breakout_type, slope, intercept = 1, 0.21, -0.21  # Simulated breakout for testing
     
     if breakout_type > 0:
         print("Breakout detected!")
         features = extract_and_flatten_features(today_idx, df)
         if features.size == 0:
             return
-        features = features.reshape(1, -1) 
-        imputer = SimpleImputer(strategy='mean')
-        features = imputer.fit_transform(features)
+
         model_filename = f"{table_name}_model.pkl"
         model = joblib.load(model_filename)
         print("model bien chargé<<<<")
-        scaler = StandardScaler()
-     
-        features_scaled = scaler.fit_transform(features.reshape(1, -1))
+
+        # Use the same preprocessing pipeline as in training
+        preprocessor = create_preprocessing_pipeline()
+        features = features.reshape(1, -1)
+        features_scaled = preprocessor.fit_transform(features)
+
         prediction = model.predict(features_scaled)
-        prediction[0]='VH'
+        prediction[0] = 'VH'
         if prediction[0] in ['VH', 'VB']:
             message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
             send_telegram_message(message)
