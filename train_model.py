@@ -372,6 +372,7 @@ def main():
 
     for table in tables:
         train_and_save_model(session, table['TABLE_NAME'])
+        print("Model saved pout l'action")
         # Check for VH or VB
         df = session.table(table['TABLE_NAME']).to_pandas()
         vh_vb = df[(df['Breakout_Confirmed'] == 'VH') | (df['Breakout_Confirmed'] == 'VB')]
