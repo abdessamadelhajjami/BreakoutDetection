@@ -329,17 +329,30 @@ def train_and_save_model(df, table_name):
     # Conversion finale en tableaux numpy pour les caractéristiques et les labels
     X = np.array(features)
     y = np.array(labels)
+
+    # Imputation des valeurs manquantes
     imputer = SimpleImputer(strategy='mean')
     X = imputer.fit_transform(X)
+
+    # Enregistrement des colonnes
+    columns = [f'feature_{i}' for i in range(X.shape[1])]
+    columns_filename = f"{table_name}_columns.pkl"
+    joblib.dump(columns, columns_filename)
+    print(f"Columns saved as {columns_filename}")
+
     # Préparation des caractéristiques et des étiquettes pour l'entraînement
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+
+    # Mise à l'échelle des caractéristiques
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
-    
+
+    # Entraînement du modèle
     model = RandomForestClassifier(n_estimators=800, max_depth=10, random_state=42, n_jobs=1)
     model.fit(X_train_scaled, y_train)
-    
+
+    # Évaluation du modèle
     y_pred = model.predict(X_test_scaled)
     accuracy = accuracy_score(y_test, y_pred)
     report = classification_report(y_test, y_pred, zero_division=0)
@@ -347,6 +360,7 @@ def train_and_save_model(df, table_name):
     print(f"Accuracy on test data for {table_name}: {accuracy}")
     print(f"Classification Report for {table_name}:\n{report}")
 
+    # Enregistrement du modèle et du scaler
     model_filename = f"{table_name}_model.pkl"
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
@@ -355,6 +369,9 @@ def train_and_save_model(df, table_name):
     joblib.dump(scaler, scaler_filename)
     print(f"Scaler saved as {scaler_filename}")
 
+    imputer_filename = f"{table_name}_imputer.pkl"
+    joblib.dump(imputer, imputer_filename)
+    print(f"Imputer saved as {imputer_filename}")
 
     
 # Send Telegram notification
@@ -376,43 +393,52 @@ import numpy as np
 
 def load_and_predict(df, symbol, table_name):
     print('[MAIN] : Predicting with model...')
-    
+
     today_idx = df.index[-1]
-    breakout_type, slope, intercept = 1, 0.24, 0.12  # isBreakOut(df, today_idx)
-    
+    breakout_type, slope, intercept = 1, 0.24, 0.12  # Simulé pour le test
+
     if breakout_type > 0:
         print("Breakout detected!")
         features = extract_and_flatten_features(today_idx, df)
         if features is None or features.size == 0:
             print("No features extracted, prediction skipped.")
             return
-        
-        # Imputer pour gérer les valeurs manquantes
-        imputer = SimpleImputer(strategy='mean')
-        features = imputer.fit_transform(features.reshape(1, -1))
 
-        model_filename = f"{table_name}_model.pkl"
-        model = joblib.load(model_filename)
-        print("Model loaded successfully.")
-
-        # Charger le scaler utilisé pour l'entraînement
+        # Charger l'imputer, le scaler, les colonnes et le modèle utilisés lors de l'entraînement
+        imputer_filename = f"{table_name}_imputer.pkl"
         scaler_filename = f"{table_name}_scaler.pkl"
+        columns_filename = f"{table_name}_columns.pkl"
+        model_filename = f"{table_name}_model.pkl"
+
+        imputer = joblib.load(imputer_filename)
         scaler = joblib.load(scaler_filename)
-        
+        columns = joblib.load(columns_filename)
+        model = joblib.load(model_filename)
+
+        print("Model, scaler, imputer, and columns loaded successfully.")
+
+        # Imputer les valeurs manquantes
+        features = imputer.transform(features.reshape(1, -1))
+
+        # Vérifier et ajuster les caractéristiques pour correspondre à l'entraînement
+        if len(features[0]) < len(columns):
+            features = np.pad(features, ((0, 0), (0, len(columns) - len(features[0]))), 'constant', constant_values=np.nan)
+        elif len(features[0]) > len(columns):
+            features = features[:, :len(columns)]
+
         # Mettre à l'échelle les caractéristiques
         features_scaled = scaler.transform(features)
-        
+
         # Prédiction
         prediction = model.predict(features_scaled)
         prediction[0] = 'VH'  # Directly set the value for testing
-        
+
         if prediction[0] in ['VH', 'VB']:
             message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
             send_telegram_message(message)
     else:
         print("No breakout detected.")
     print("Finish.")
-
 
 
 def main():
