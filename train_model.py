@@ -19,7 +19,7 @@ TELEGRAM_API_URL = "https://api.telegram.org/bot7010066680:AAHJxpChwtfiK0PBhJFAG
 TELEGRAM_CHAT_ID = "https://t.me/Breakout_Channel" 
 
 # Snowflake connection configuration
-SNOWFLAKE_CONN = {
+CONN = {
     'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
         'user': 'AELHAJJAMI',
         'password': 'Abdou3012',
