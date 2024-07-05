@@ -463,7 +463,7 @@ def main():
         df.at[i, 'Slope'] = slope
         df.at[i, 'Intercept'] = intercept
 
-    Détecter et étiqueter les breakouts
+    #Détecter et étiqueter les breakouts
     df = detect_and_label_breakouts(df)
     
     Entraîner et sauvegarder le modèle
