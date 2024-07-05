@@ -306,73 +306,50 @@ def detect_and_label_breakouts(df):
     return df, Breakout_indices, Breakout_confirmed, Breakout_percentage
 
 
-def train_and_save_model(session, table_name):
-    df = session.table(table_name).to_pandas()
-
+def train_and_save_model(df, table_name):
     print(f"Data from {table_name}:")
     print(df.head())
 
-    # Calcul des indicateurs
-    df = calculate_all_indicators(df)
-    df['SAR_Reversals'] = calculate_pivot_reversals(df)
-
-    print("Indicators and SAR Reversals calculated.")
-    print(df.head())
-
-    # Détection et étiquetage des breakouts
-    results = [isBreakOut(df, i) for i in range(len(df))]
-    df['Breakout_Type'] = [r[0] for r in results]
-    df['Slope'] = [r[1] for r in results]
-    df['Intercept'] = [r[2] for r in results]
-
-    df, Breakout_indices, Breakout_confirmed, Breakout_percentage = detect_and_label_breakouts(df)
-    Breakout_indices = df[df['Breakout_Confirmed'].notna()].index
     print("Breakouts detected and labeled:")
     print(df[['Date', 'Breakout_Type', 'Slope', 'Intercept', 'Breakout_Confirmed']].head(20))
 
     # Extraction des caractéristiques
     features = []
     labels = []
-    for index in Breakout_indices:
-        flat_features = extract_and_flatten_features(index, df)
-        if flat_features is not None:
-            features.append(flat_features)
-            labels.append(df.loc[index, 'Breakout_Confirmed'])
+    for index in df.index:
+        if df.loc[index, 'Breakout_Confirmed'] in ['VH', 'VB', 'FH', 'FB']:
+            flat_features = extract_and_flatten_features(index, df)
+            if flat_features is not None:
+                features.append(flat_features)
+                labels.append(df.loc[index, 'Breakout_Confirmed'])
 
     if not features:
         print(f"No valid data to train for {table_name}")
         return
 
-    print(f"Extracted features: {features[:5]}")
-    print(f"Labels: {labels[:5]}")
-
     # Conversion finale en tableaux numpy pour les caractéristiques et les labels
-    X, y = np.array(features), np.array(labels)
-    imputer = SimpleImputer(strategy='mean')
-    X = imputer.fit_transform(X)
+    X = np.array(features)
+    y = np.array(labels)
+
     # Préparation des caractéristiques et des étiquettes pour l'entraînement
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-
-    # Normalisation des caractéristiques pour améliorer les performances du modèle
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
-
-    # Initialisation et entraînement du modèle de forêt aléatoire
+    
     model = RandomForestClassifier(n_estimators=800, max_depth=10, random_state=42, n_jobs=1)
     model.fit(X_train_scaled, y_train)
-
-    # Prédiction sur l'ensemble de test
+    
     y_pred = model.predict(X_test_scaled)
+    accuracy = accuracy_score(y_test, y_pred)
+    report = classification_report(y_test, y_pred, zero_division=0)
 
-    # Évaluation des performances du modèle
-    print(f"Accuracy on test data for {table_name}: {accuracy_score(y_test, y_pred)}")
-    print(f"Classification Report for {table_name}:\n{classification_report(y_test, y_pred)}")
+    print(f"Accuracy on test data for {table_name}: {accuracy}")
+    print(f"Classification Report for {table_name}:\n{report}")
 
     model_filename = f"{table_name}_model.pkl"
     joblib.dump(model, model_filename)
     print(f"Model saved as {model_filename}")
-
 
     
 # Send Telegram notification
@@ -385,6 +362,30 @@ def send_telegram_message(message):
     if response.status_code != 200:
         print(f"Failed to send message: {response.text}")
 
+def load_and_predict(df, symbol, table_name):
+    print('[MAIN] : Predicting with model...')
+    
+    today_idx = df.index[-1]
+    breakout_type, slope, intercept = isBreakOut(df, today_idx)
+    
+    if breakout_type > 0:
+        print("Breakout detected!")
+        features = extract_and_flatten_features(today_idx, df)
+        if features.size == 0:
+            return
+
+        model_filename = f"{table_name}_model.pkl"
+        model = joblib.load(model_filename)
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features.reshape(1, -1))
+        prediction = model.predict(features_scaled)
+        
+        if prediction[0] in ['VH', 'VB']:
+            message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
+            send_telegram_message(message)
+    else:
+        print("No breakout detected.")
+    print("Finish.")
 
 
 
@@ -408,7 +409,7 @@ def main():
         schema=SNOWFLAKE_CONN['schema']
     )
 
-    symbol = 'AAPL'
+    symbol = 'MMM'
     table_name = f'ohlcv_data_{symbol}'.upper()
     last_date = get_last_date(conn, table_name)
     data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
@@ -419,31 +420,22 @@ def main():
     print("Loaded data:")
     print(data.head())
 
-    # train_and_save_model(session, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
-
-    print('[MAIN] : Predicting with model...')
     query = f'SELECT * FROM {SNOWFLAKE_CONN["schema"]}.{table_name}'
     df = pd.read_sql(query, conn)
-    today_idx = df.index[-1]
-    breakout_type, slope, intercept = 1 , 0.24 , 0.12 #isBreakOut(df, today_idx)
-    if breakout_type > 0:
-        print("Breakout detected!")
-        features = extract_and_flatten_features(today_idx, df)
-        if features.size == 0:
-            return
 
-        model_filename = f"{table_name}_model.pkl"
-        model = joblib.load(model_filename)
-        scaler = StandardScaler()  # Need to ensure scaler is consistent with training
-        features_scaled = scaler.fit_transform(features.reshape(1, -1))
-        prediction = model.predict(features_scaled)
-        prediction = ['VB']
-        if prediction[0] in ['VH', 'VB']:
-            message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
-            send_telegram_message(message)
-    else:
-        print("No breakout detected.")
-    print("Finish.")
+    # Calculer les indicateurs et les SAR
+    df = calculate_all_indicators(df)
+    df['SAR_Reversals'] = calculate_pivot_reversals(df)
+
+    # Détecter et étiqueter les breakouts
+    df = detect_and_label_breakouts(df)
+    
+    # Entraîner et sauvegarder le modèle
+    train_and_save_model(df, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
+
+    # Charger le modèle et prédire
+    load_and_predict(df, symbol, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
+
     conn.close()
     session.close()
 
