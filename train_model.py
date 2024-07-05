@@ -366,7 +366,7 @@ def load_and_predict(df, symbol, table_name):
     print('[MAIN] : Predicting with model...')
     
     today_idx = df.index[-1]
-    breakout_type, slope, intercept = isBreakOut(df, today_idx)
+    breakout_type, slope, intercept = 1 , 0.21 , -0.21 # isBreakOut(df, today_idx)
     
     if breakout_type > 0:
         print("Breakout detected!")
@@ -376,10 +376,11 @@ def load_and_predict(df, symbol, table_name):
 
         model_filename = f"{table_name}_model.pkl"
         model = joblib.load(model_filename)
+        print("model bien chargé<<<<")
         scaler = StandardScaler()
         features_scaled = scaler.fit_transform(features.reshape(1, -1))
         prediction = model.predict(features_scaled)
-        
+        prediction[0]=['VH']
         if prediction[0] in ['VH', 'VB']:
             message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
             send_telegram_message(message)
@@ -441,7 +442,7 @@ def main():
     df = detect_and_label_breakouts(df)
     
     # Entraîner et sauvegarder le modèle
-    train_and_save_model(df, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
+    #train_and_save_model(df, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
 
     # Charger le modèle et prédire
     load_and_predict(df, symbol, f"{SNOWFLAKE_CONN['schema']}.{table_name}")
