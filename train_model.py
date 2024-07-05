@@ -376,6 +376,15 @@ def main():
         'schema': SNOWFLAKE_CONN['schema']
     }
     session = Session.builder.configs(connection_parameters).create()
+    
+    conn = snowflake.connector.connect(
+        user=SNOWFLAKE_CONN['user'],
+        password=SNOWFLAKE_CONN['password'],
+        account=SNOWFLAKE_CONN['account'],
+        warehouse=SNOWFLAKE_CONN['warehouse'],
+        database=SNOWFLAKE_CONN['database'],
+        schema=SNOWFLAKE_CONN['schema']
+    )
 
     symbol = 'AAPL'
     table_name = f'ohlcv_data_{symbol}'.upper()
@@ -392,7 +401,7 @@ def main():
 
     print('[MAIN] : Predicting with model...')
     query = f'SELECT * FROM {SNOWFLAKE_CONN["schema"]}.{table_name}'
-    df = pd.read_sql(query, engine)
+    df = pd.read_sql(query, conn)
     today_idx = df.index[-1]
     breakout_type, slope, intercept = isBreakOut(df, today_idx)
     if breakout_type > 0:
@@ -403,7 +412,8 @@ def main():
 
         model_filename = f"{table_name}_model.pkl"
         model = joblib.load(model_filename)
-        features_scaled = scaler.transform(features.reshape(1, -1))
+        scaler = StandardScaler()  # Need to ensure scaler is consistent with training
+        features_scaled = scaler.fit_transform(features.reshape(1, -1))
         prediction = model.predict(features_scaled)
         if prediction[0] in ['VH', 'VB']:
             message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
@@ -412,10 +422,10 @@ def main():
         print("No breakout detected.")
     print("Finish.")
     conn.close()
+    session.close()
 
 if __name__ == "__main__":
     main()
-
 
 
 
