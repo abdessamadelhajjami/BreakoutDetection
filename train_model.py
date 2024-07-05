@@ -308,7 +308,7 @@ def detect_and_label_breakouts(df, confirmation_candles=5, threshold_percentage=
 
 
 
-   def train_and_save_model(session, table_name):
+def train_and_save_model(session, table_name):
     df = session.table(table_name).to_pandas()
 
     print(f"Data from {table_name}:")
