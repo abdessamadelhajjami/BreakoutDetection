@@ -328,7 +328,7 @@ def main():
     )
     print('[MAIN] : Connected to Snowflake for SP500 data.')
 
-    symbol = 'AAPL'
+    symbol = 'MMM'
     table_name = f'ohlcv_data_{symbol}'.upper()
     last_date = get_last_date(conn, SP500_CONN['schema'], table_name)
     data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
