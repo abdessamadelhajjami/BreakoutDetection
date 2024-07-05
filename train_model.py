@@ -480,9 +480,9 @@ def main():
     df['SAR_Reversals'] = calculate_pivot_reversals(df)
 
     # # Ajouter les colonnes nécessaires pour les breakouts
-    # df['Breakout_Type'] = np.nan
-    # df['Slope'] = np.nan
-    # df['Intercept'] = np.nan
+    df['Breakout_Type'] = np.nan
+    df['Slope'] = np.nan
+    df['Intercept'] = np.nan
     # for i in range(len(df)):
     #     breakout_type, slope, intercept = isBreakOut(df, i)
     #     df.at[i, 'Breakout_Type'] = breakout_type
