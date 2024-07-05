@@ -206,8 +206,8 @@ def calculate_all_indicators(df):
     df = calculate_keltner_channel(df)
     
     # Remplir les NaN avec les moyennes des colonnes respectives, sauf pour la colonne 'Date'
-    df = df.apply(lambda x: x.fillna(x.mean()) if x.name != 'Date' else x, axis=0)
-    
+    df = df.apply(lambda x: x.fillna(x.mean()) if x.name not in ['Date', 'Breakout Type', 'Slope', 'Intercept', 'Breakout Confirmed'] else x, axis=0)
+
     return df
 
 def extract_and_flatten_features(candle, df):
