@@ -324,7 +324,7 @@ def train_and_save_model(session, table_name):
     df['Intercept'] = [r[2] for r in results]
 
     df, Breakout_indices, Breakout_confirmed, Breakout_percentage = detect_and_label_breakouts(df)
-
+    Breakout_indices = df[df['Breakout_Confirmed'].notna()].index
     print("Breakouts detected and labeled:")
     print(df[['Date', 'Breakout_Type', 'Slope', 'Intercept', 'Breakout_Confirmed']].head(20))
 
