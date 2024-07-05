@@ -309,7 +309,6 @@ def detect_and_label_breakouts(df, confirmation_candles=5, threshold_percentage=
 
 
 def main():
-    # Connexion à Snowflake
     SP500_CONN = {
         'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
         'user': 'AELHAJJAMI',
@@ -318,7 +317,6 @@ def main():
         'database': 'BREAKOUDETECTIONDB',
         'schema': 'SP500',
     }
-
     conn_str = f'snowflake://{SP500_CONN["user"]}:{SP500_CONN["password"]}@{SP500_CONN["account"]}/{SP500_CONN["database"]}/{SP500_CONN["schema"]}?warehouse={SP500_CONN["warehouse"]}'
     engine = create_engine(conn_str)
 
@@ -333,60 +331,30 @@ def main():
     )
     print('[MAIN] : Connected to Snowflake for SP500 data.')
 
-    symbol = 'AAL'
+    symbol = 'AAPL'
     table_name = f'ohlcv_data_{symbol}'.upper()
     last_date = get_last_date(conn, SP500_CONN['schema'], table_name)
     data = download_sp500_data(symbol, last_date, pd.Timestamp.now().strftime('%Y-%m-%d'))
 
-    # Charger les données dans Snowflake
-    load_data_to_snowflake(conn, data, SP500_CONN['schema'], table_name)
-
-    # Lire les données depuis Snowflake dans un DataFrame pandas
-    query = f'SELECT * FROM {SP500_CONN["schema"]}.{table_name}'
-    df = pd.read_sql(query, engine)
-
-    # Entraîner et sauvegarder le modèle
-    train_and_save_model(df, f"{SP500_CONN['schema']}.{table_name}")
-
-    print('[MAIN] : Predicting with model...')
-    today_idx = df.index[-1]
-    breakout_type, slope, intercept = isBreakOut(df, today_idx)
-    if breakout_type > 0:
-        print("Breakout detected!")
-        features = extract_and_flatten_features(today_idx, df)
-        if features.size == 0:
-            return
-
-        model_filename = f"{table_name}_model.pkl"
-        model = joblib.load(model_filename)
-        scaler = StandardScaler()
-        features_scaled = scaler.fit_transform(features.reshape(1, -1))
-        prediction = model.predict(features_scaled)
-        if prediction[0] in ['VH', 'VB']:
-            message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
-            send_telegram_message(message)
-    else:
-        print("No breakout detected.")
-    print("Finish.")
-    conn.close()
-
-def train_and_save_model(df, table_name):
-    print(f"Data from {table_name}:")
-    print(df.head())
+    print("Loaded data:")
+    print(data.head())
 
     # Calcul des indicateurs
-    df = calculate_all_indicators(df)
+    data = calculate_all_indicators(data)
 
-    print("Indicators calculated.")
-    print(df.head())
+    print("Indicators calculated:")
+    print(data.head())
 
     # Détection et étiquetage des breakouts
-    df, Breakout_indices, Breakout_confirmed = detect_and_label_breakouts(df)
+    data, Breakout_indices, Breakout_confirmed = detect_and_label_breakouts(data)
+
+    print("Breakouts detected and labeled:")
+    print(data[['Date', 'Breakout Type', 'Slope', 'Intercept', 'Breakout Confirmed']].head(20))
 
     # Extraction des caractéristiques
     features = []
     for index in Breakout_indices:
-        flat_features = extract_and_flatten_features(index, df)
+        flat_features = extract_and_flatten_features(index, data)
         if flat_features is not None:
             features.append(flat_features)
 
@@ -424,6 +392,10 @@ def train_and_save_model(df, table_name):
     model_filename = f"{table_name}_model.pkl"
     joblib.dump(model_rf, model_filename)
     print(f"Model saved as {model_filename}")
+
+if __name__ == "__main__":
+    main()
+
 
 if __name__ == "__main__":
     main()
