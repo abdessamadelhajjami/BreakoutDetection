@@ -386,15 +386,23 @@ def train_and_save_model(df, table_name):
 
     
 # Send Telegram notification
-def send_telegram_message(message):
+def send_telegram_message(symbol, breakout_type, price, percentage_change, yahoo_finance_link):
+    message = (
+        f"Breakout Alert for {symbol}!\n"
+        f"Type: {'Bullish' if breakout_type == 'VH' else 'Bearish'}\n"
+        f"Current Price: ${price:.2f}\n"
+        f"Variation: {percentage_change:.2f}%\n"
+        f"[View on Yahoo Finance]({yahoo_finance_link})"
+    )
+    
     payload = {
         'chat_id': TELEGRAM_CHAT_ID,
-        'text': message
+        'text': message,
+        'parse_mode': 'Markdown'  # to ensure the link is clickable
     }
     response = requests.post(TELEGRAM_API_URL, data=payload)
     if response.status_code != 200:
         print(f"Failed to send message: {response.text}")
-
 
 
 import joblib
@@ -406,7 +414,7 @@ def load_and_predict(df, symbol, table_name):
     print('[MAIN] : Predicting with model...')
 
     today_idx = df.index[-1]
-    breakout_type, slope, intercept = isBreakOut(df, today_idx) # Simulé pour le test
+    breakout_type, slope, intercept = isBreakOut(df, today_idx)  # Simulé pour le test
 
     if breakout_type > 0:
         print("Breakout detected!")
@@ -445,8 +453,12 @@ def load_and_predict(df, symbol, table_name):
         #prediction[0] = 'VH'  # Directly set the value for testing
 
         if prediction[0] in ['VH', 'VB']:
-            message = f"A True Bullish/Bearish breakout detected today for {symbol}: {prediction[0]}"
-            send_telegram_message(message)
+            current_price = df.loc[today_idx, 'Close']
+            previous_price = df.loc[today_idx - 1, 'Close']
+            percentage_change = ((current_price - previous_price) / previous_price) * 100
+            yahoo_finance_link = f"https://fr.finance.yahoo.com/chart/{symbol}"
+
+            send_telegram_message(symbol, prediction[0], current_price, percentage_change, yahoo_finance_link)
     else:
         print("No breakout detected.")
     print("Finish.")
@@ -526,5 +538,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
