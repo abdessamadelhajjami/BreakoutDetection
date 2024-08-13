@@ -22,21 +22,21 @@ TELEGRAM_CHAT_ID = "-1002197712630"
 
 # Snowflake connection configuration
 SNOWFLAKE_CONN = {
-    'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
-        'user': 'AELHAJJAMI',
-        'password': 'Abdou3012',
-        'warehouse': 'COMPUTE_WH',
-        'database': 'BREAKOUDETECTIONDB',
-        'schema': 'SP500',
+    'account': '', 
+        'user': '',
+        'password': '',
+        'warehouse': '',
+        'database': '',
+        'schema': '',
 }
 
 CONN = {
-    'account': 'MOODBPJ-ATOS_AWS_EU_WEST_1',
-        'user': 'AELHAJJAMI',
-        'password': 'Abdou3012',
-        'warehouse': 'COMPUTE_WH',
-        'database': 'BREAKOUDETECTIONDB',
-        'schema': 'SP500',
+    'account': '',
+        'user': '',
+        'password': '',
+        'warehouse': '',
+        'database': '',
+        'schema': '',
 }
 
 
